@@ -15,6 +15,7 @@ from database import create_db, engine, get_session
 from models import Device, ScanLog, Settings
 from scanner import scan_networks, get_local_networks
 import mikrotik
+import edgeswitch
 
 
 scheduler = AsyncIOScheduler()
@@ -109,6 +110,8 @@ class DeviceUpdate(BaseModel):
     network: Optional[str] = None
     mikrotik_user: Optional[str] = None
     mikrotik_pass: Optional[str] = None
+    edgeswitch_user: Optional[str] = None
+    edgeswitch_pass: Optional[str] = None
     alias_of: Optional[int] = None
 
 
@@ -325,22 +328,41 @@ async def get_topology(session: Session = Depends(get_session)):
             seen_links.add(key)
             unique_links.append(lnk)
 
+    mac_to_device = {d.mac.upper(): d for d in devices if d.mac}
+
+    # MikroTik: refine topology via ARP table
     mt_devices = [d for d in devices if d.mikrotik_user and d.mikrotik_pass]
     if mt_devices:
         arp_results = await asyncio.gather(
             *[mikrotik.get_arp_table(d.ip, d.mikrotik_user, d.mikrotik_pass) for d in mt_devices],
             return_exceptions=True,
         )
-        mac_to_device = {d.mac.upper(): d for d in devices if d.mac}
         for mt_dev, arp in zip(mt_devices, arp_results):
             if isinstance(arp, Exception) or not arp:
                 continue
             for entry in arp:
                 mac = entry.get("mac-address", "").upper()
                 target = mac_to_device.get(mac)
-                if target and target.id != mt_dev.id:
+                if target and target.id != mt_dev.id and target.id not in aliased_ids:
                     unique_links = [l for l in unique_links if l["target"] != target.id]
                     unique_links.append({"source": mt_dev.id, "target": target.id})
+
+    # EdgeSwitch: refine topology via FDB (MAC address table — most accurate)
+    es_devices = [d for d in devices if d.edgeswitch_user and d.edgeswitch_pass]
+    if es_devices:
+        fdb_results = await asyncio.gather(
+            *[edgeswitch.get_fdb(d.ip, d.edgeswitch_user, d.edgeswitch_pass) for d in es_devices],
+            return_exceptions=True,
+        )
+        for es_dev, fdb in zip(es_devices, fdb_results):
+            if isinstance(fdb, Exception) or not fdb:
+                continue
+            for entry in fdb:
+                mac = entry.get("mac_address", "").upper()
+                target = mac_to_device.get(mac)
+                if target and target.id != es_dev.id and target.id not in aliased_ids:
+                    unique_links = [l for l in unique_links if l["target"] != target.id]
+                    unique_links.append({"source": es_dev.id, "target": target.id})
 
     return {"links": unique_links, "aliases": list(aliased_ids)}
 
@@ -352,17 +374,30 @@ async def get_traffic_stats(session: Session = Depends(get_session)):
     mt_devices = session.exec(
         select(Device).where(Device.mikrotik_user.isnot(None))
     ).all()
+    es_devices = session.exec(
+        select(Device).where(Device.edgeswitch_user.isnot(None))
+    ).all()
 
-    if not mt_devices:
+    if not mt_devices and not es_devices:
         return {"devices": {}}
 
+    tasks = (
+        [(d, "mikrotik") for d in mt_devices] +
+        [(d, "edgeswitch") for d in es_devices]
+    )
+
     results = await asyncio.gather(
-        *[mikrotik.get_traffic(d.id, d.ip, d.mikrotik_user, d.mikrotik_pass) for d in mt_devices],
+        *[
+            mikrotik.get_traffic(d.id, d.ip, d.mikrotik_user, d.mikrotik_pass)
+            if kind == "mikrotik"
+            else edgeswitch.get_traffic(d.id, d.ip, d.edgeswitch_user, d.edgeswitch_pass)
+            for d, kind in tasks
+        ],
         return_exceptions=True,
     )
 
     traffic = {}
-    for d, res in zip(mt_devices, results):
+    for (d, _), res in zip(tasks, results):
         if not isinstance(res, Exception):
             traffic[str(d.id)] = res
 

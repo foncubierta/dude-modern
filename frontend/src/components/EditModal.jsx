@@ -12,10 +12,15 @@ export function EditModal({ device, devices, onSave, onClose }) {
     tags: device.tags || "",
     mikrotik_user: device.mikrotik_user || "",
     mikrotik_pass: device.mikrotik_pass || "",
+    edgeswitch_user: device.edgeswitch_user || "",
+    edgeswitch_pass: device.edgeswitch_pass || "",
     alias_of: device.alias_of ?? "",
   });
   const [showMikrotik, setShowMikrotik] = useState(
     !!(device.mikrotik_user || device.mikrotik_pass)
+  );
+  const [showEdgeSwitch, setShowEdgeSwitch] = useState(
+    !!(device.edgeswitch_user || device.edgeswitch_pass)
   );
 
   function set(key, val) {
@@ -31,6 +36,8 @@ export function EditModal({ device, devices, onSave, onClose }) {
       tags: form.tags || null,
       mikrotik_user: form.mikrotik_user || null,
       mikrotik_pass: form.mikrotik_pass || null,
+      edgeswitch_user: form.edgeswitch_user || null,
+      edgeswitch_pass: form.edgeswitch_pass || null,
       alias_of: form.alias_of ? Number(form.alias_of) : null,
     });
     onClose();
@@ -152,6 +159,43 @@ export function EditModal({ device, devices, onSave, onClose }) {
                     type="password"
                     value={form.mikrotik_pass}
                     onChange={(e) => set("mikrotik_pass", e.target.value)}
+                    placeholder="••••••"
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className={styles.section}>
+          <button className={styles.sectionToggle} onClick={() => setShowEdgeSwitch((v) => !v)}>
+            {showEdgeSwitch ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            Ubiquiti EdgeSwitch API
+            {form.edgeswitch_user && <span className={styles.badge}>configured</span>}
+          </button>
+          {showEdgeSwitch && (
+            <div className={styles.sectionBody}>
+              <p className={styles.hint}>
+                Enables precise topology from MAC address table (FDB) and real-time
+                per-port traffic. Uses EdgeSwitch REST API (HTTPS port 443, falls back to HTTP 80).
+              </p>
+              <div className={styles.row}>
+                <div className={styles.field}>
+                  <label>Username</label>
+                  <input
+                    value={form.edgeswitch_user}
+                    onChange={(e) => set("edgeswitch_user", e.target.value)}
+                    placeholder="ubnt"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label>Password</label>
+                  <input
+                    type="password"
+                    value={form.edgeswitch_pass}
+                    onChange={(e) => set("edgeswitch_pass", e.target.value)}
                     placeholder="••••••"
                     autoComplete="new-password"
                   />
