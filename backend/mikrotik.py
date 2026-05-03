@@ -21,6 +21,11 @@ async def get_arp_table(ip: str, user: str, password: str) -> list[dict]:
     return await _api_get(ip, user, password, "/ip/arp")
 
 
+async def get_dhcp_leases(ip: str, user: str, password: str) -> list[dict]:
+    """DHCP leases with active-hostname — the name the client announced."""
+    return await _api_get(ip, user, password, "/ip/dhcp-server/lease")
+
+
 async def get_traffic(device_id: int, ip: str, user: str, password: str) -> dict:
     ifaces = await _api_get(ip, user, password, "/interface")
     now = time.time()
