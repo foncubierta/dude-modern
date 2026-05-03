@@ -23,19 +23,34 @@ def _md5(password: str) -> str:
     return hashlib.md5(password.encode()).hexdigest().upper()
 
 
+def _client(ip: str) -> httpx.AsyncClient:
+    """HttpClient configured for Pharos OS embedded web server."""
+    return httpx.AsyncClient(
+        verify=False,
+        timeout=8,
+        http1=True,
+        http2=False,
+        headers={
+            "Content-Type": "application/json",
+            "Referer": f"http://{ip}/",
+            "Origin": f"http://{ip}",
+        },
+    )
+
+
 async def _login(ip: str, user: str, password: str) -> Optional[str]:
     url = f"http://{ip}/"
     payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
     try:
-        async with httpx.AsyncClient(verify=False, timeout=6) as client:
+        async with _client(ip) as client:
             resp = await client.post(url, json=payload)
-            print(f"[tplink_cpe] login {ip} status={resp.status_code} body={resp.text[:200]}")
+            print(f"[tplink_cpe] login {ip} status={resp.status_code} body={resp.text[:300]}")
             data = resp.json()
             stok = data.get("stok", "")
             if stok:
                 _stok_cache[ip] = stok
                 return stok
-            print(f"[tplink_cpe] login {ip} no stok in response: {data}")
+            print(f"[tplink_cpe] login {ip} no stok: error_code={data.get('error_code')}")
     except Exception as e:
         print(f"[tplink_cpe] login {ip} error: {type(e).__name__}: {e}")
     return None
@@ -48,7 +63,7 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
 
     url = f"http://{ip}/stok={stok}/ds"
     try:
-        async with httpx.AsyncClient(verify=False, timeout=6) as client:
+        async with _client(ip) as client:
             resp = await client.post(url, json=payload)
             data = resp.json()
             if data.get("error_code") == -40401:
@@ -62,7 +77,7 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
                 data = resp.json()
             return data
     except Exception as e:
-        print(f"[tplink_cpe] request {ip} error: {e}")
+        print(f"[tplink_cpe] request {ip} error: {type(e).__name__}: {e}")
         _stok_cache.pop(ip, None)
     return None
 
