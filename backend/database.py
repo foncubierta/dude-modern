@@ -12,6 +12,7 @@ engine = create_engine(DB_URL, echo=False, connect_args={"check_same_thread": Fa
 _MIGRATIONS = [
     "ALTER TABLE device ADD COLUMN mikrotik_user TEXT",
     "ALTER TABLE device ADD COLUMN mikrotik_pass TEXT",
+    "ALTER TABLE device ADD COLUMN alias_of INTEGER REFERENCES device(id)",
 ]
 
 

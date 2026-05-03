@@ -68,6 +68,7 @@ export default function App() {
       {editing && (
         <EditModal
           device={editing}
+          devices={devices}
           onSave={updateDevice}
           onClose={() => setEditing(null)}
         />

@@ -3,7 +3,7 @@ import { X, ChevronDown, ChevronRight } from "lucide-react";
 import { DeviceIcon, ICON_TYPES } from "./DeviceIcon";
 import styles from "./EditModal.module.css";
 
-export function EditModal({ device, onSave, onClose }) {
+export function EditModal({ device, devices, onSave, onClose }) {
   const [form, setForm] = useState({
     label: device.label || "",
     icon: device.icon || "unknown",
@@ -12,6 +12,7 @@ export function EditModal({ device, onSave, onClose }) {
     tags: device.tags || "",
     mikrotik_user: device.mikrotik_user || "",
     mikrotik_pass: device.mikrotik_pass || "",
+    alias_of: device.alias_of ?? "",
   });
   const [showMikrotik, setShowMikrotik] = useState(
     !!(device.mikrotik_user || device.mikrotik_pass)
@@ -30,6 +31,7 @@ export function EditModal({ device, onSave, onClose }) {
       tags: form.tags || null,
       mikrotik_user: form.mikrotik_user || null,
       mikrotik_pass: form.mikrotik_pass || null,
+      alias_of: form.alias_of ? Number(form.alias_of) : null,
     });
     onClose();
   }
@@ -100,6 +102,27 @@ export function EditModal({ device, onSave, onClose }) {
             placeholder="rack, main, critical"
           />
         </div>
+
+        {devices && devices.filter((d) => d.id !== device.id).length > 0 && (
+          <div className={styles.field}>
+            <label>Same physical device as</label>
+            <select value={form.alias_of} onChange={(e) => set("alias_of", e.target.value)}>
+              <option value="">— none —</option>
+              {devices
+                .filter((d) => d.id !== device.id && !d.alias_of)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label || d.hostname || d.ip}
+                  </option>
+                ))}
+            </select>
+            {form.alias_of && (
+              <span className={styles.aliasHint}>
+                This device will be hidden from the map. Its subnet connections will be handled by the primary device.
+              </span>
+            )}
+          </div>
+        )}
 
         <div className={styles.section}>
           <button className={styles.sectionToggle} onClick={() => setShowMikrotik((v) => !v)}>

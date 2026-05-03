@@ -109,6 +109,7 @@ class DeviceUpdate(BaseModel):
     network: Optional[str] = None
     mikrotik_user: Optional[str] = None
     mikrotik_pass: Optional[str] = None
+    alias_of: Optional[int] = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -259,18 +260,60 @@ def _gateway_for_network(cidr: str, devices: list[Device]) -> Optional[Device]:
 async def get_topology(session: Session = Depends(get_session)):
     devices = session.exec(select(Device)).all()
 
+    # Build alias resolution map: alias_id → primary_id
+    def resolve(device_id: int, alias_map: dict) -> int:
+        seen = set()
+        while device_id in alias_map and device_id not in seen:
+            seen.add(device_id)
+            device_id = alias_map[device_id]
+        return device_id
+
+    alias_map = {d.id: d.alias_of for d in devices if d.alias_of}
+    aliased_ids = set(alias_map.keys())
+
+    # Only use non-alias devices for topology
+    real_devices = [d for d in devices if d.id not in aliased_ids]
+
     by_network: dict[str, list[Device]] = {}
-    for d in devices:
+    for d in real_devices:
         if d.network:
             by_network.setdefault(d.network, []).append(d)
 
+    # Also include alias devices in subnet groups (resolving to their primary)
+    for d in devices:
+        if d.id in aliased_ids and d.network:
+            primary_id = resolve(d.id, alias_map)
+            # alias devices' subnets are now owned by the primary
+            by_network.setdefault(d.network, [])
+
     links: list[dict] = []
     for cidr, net_devs in by_network.items():
-        gw = _gateway_for_network(cidr, net_devs)
+        # Resolve any alias devices in this subnet to their primary
+        resolved_devs = []
+        for d in net_devs:
+            if d.id in aliased_ids:
+                primary_id = resolve(d.id, alias_map)
+                primary = next((x for x in devices if x.id == primary_id), None)
+                if primary and primary not in resolved_devs:
+                    resolved_devs.append(primary)
+            else:
+                if d not in resolved_devs:
+                    resolved_devs.append(d)
+
+        gw = _gateway_for_network(cidr, resolved_devs)
         if gw:
-            for d in net_devs:
+            for d in resolved_devs:
                 if d.id != gw.id:
                     links.append({"source": gw.id, "target": d.id})
+
+    # Deduplicate links
+    seen_links: set[tuple] = set()
+    unique_links = []
+    for l in links:
+        key = (l["source"], l["target"])
+        if key not in seen_links:
+            seen_links.add(key)
+            unique_links.append(l)
 
     mt_devices = [d for d in devices if d.mikrotik_user and d.mikrotik_pass]
     if mt_devices:
@@ -286,10 +329,10 @@ async def get_topology(session: Session = Depends(get_session)):
                 mac = entry.get("mac-address", "").upper()
                 target = mac_to_device.get(mac)
                 if target and target.id != mt_dev.id:
-                    links = [l for l in links if l["target"] != target.id]
-                    links.append({"source": mt_dev.id, "target": target.id})
+                    unique_links = [l for l in unique_links if l["target"] != target.id]
+                    unique_links.append({"source": mt_dev.id, "target": target.id})
 
-    return {"links": links}
+    return {"links": unique_links, "aliases": list(aliased_ids)}
 
 
 # ── Traffic ───────────────────────────────────────────────────────────────────

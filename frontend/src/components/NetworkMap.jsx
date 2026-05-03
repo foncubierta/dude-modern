@@ -40,14 +40,17 @@ export function NetworkMap({ devices, topology, traffic, onEdit, onDelete, onMov
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
   useEffect(() => {
-    setNodes(devices.map((d) => ({
-      id: String(d.id),
-      type: "device",
-      position: { x: d.x, y: d.y },
-      data: { device: d, traffic: traffic?.devices?.[String(d.id)], onEdit, onDelete },
-      draggable: true,
-    })));
-  }, [devices, traffic, onEdit, onDelete]);
+    const aliasedIds = new Set(topology?.aliases ?? []);
+    setNodes(devices
+      .filter((d) => !aliasedIds.has(d.id))
+      .map((d) => ({
+        id: String(d.id),
+        type: "device",
+        position: { x: d.x, y: d.y },
+        data: { device: d, traffic: traffic?.devices?.[String(d.id)], onEdit, onDelete },
+        draggable: true,
+      })));
+  }, [devices, topology, traffic, onEdit, onDelete]);
 
   useEffect(() => {
     setEdges(buildEdges(topology, traffic));

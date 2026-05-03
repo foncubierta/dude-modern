@@ -22,6 +22,7 @@ class Device(SQLModel, table=True):
     network: Optional[str] = None
     mikrotik_user: Optional[str] = None
     mikrotik_pass: Optional[str] = None
+    alias_of: Optional[int] = Field(default=None, foreign_key="device.id")
 
 
 class ScanLog(SQLModel, table=True):

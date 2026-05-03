@@ -89,6 +89,7 @@
 .sectionBody { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 
 .hint { font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+.aliasHint { font-size: 11px; color: #f0883e; margin-top: 4px; display: block; }
 
 .footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
