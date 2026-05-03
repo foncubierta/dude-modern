@@ -406,6 +406,7 @@ async def get_topology(session: Session = Depends(get_session)):
             unique_links.append(lnk)
 
     mac_to_device = {d.mac.upper(): d for d in devices if d.mac}
+    ip_to_device  = {d.ip: d for d in devices}
 
     # MikroTik: refine topology via ARP table
     mt_devices = [d for d in devices if d.mikrotik_user and d.mikrotik_pass]
@@ -459,11 +460,10 @@ async def get_topology(session: Session = Depends(get_session)):
                 continue
             for station in stations:
                 mac = station.get("mac", "").upper()
-                if not mac:
-                    continue
-                target = mac_to_device.get(mac)
+                ip  = station.get("ip", "")
+                # Match by MAC first, fall back to IP (ARP table entries have both)
+                target = (mac_to_device.get(mac) if mac else None) or (ip_to_device.get(ip) if ip else None)
                 if target and target.id != cpe_dev.id and target.id not in aliased_ids:
-                    # CPE clients can be on any subnet — no subnet restriction
                     unique_links = [l for l in unique_links if l["target"] != target.id]
                     unique_links.append({"source": cpe_dev.id, "target": target.id})
 

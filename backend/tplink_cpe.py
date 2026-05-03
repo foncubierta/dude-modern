@@ -95,6 +95,22 @@ def _parse_stations(output: str, cmd: str) -> list[dict]:
         if current:
             stations.append(current)
 
+    elif "arp" in cmd:
+        # /proc/net/arp format:
+        # IP address       HW type  Flags  HW address            Mask  Device
+        # 192.168.10.80    0x1      0x2    f8:17:2d:de:af:7e     *     br-lan
+        for line in output.splitlines()[1:]:   # skip header
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            ip_addr = parts[0]
+            flags = parts[2]
+            mac = parts[3].upper()
+            if flags == "0x0":
+                continue  # incomplete entry
+            if not mac_re.match(mac):
+                continue
+            stations.append({"mac": mac, "ip": ip_addr})
     else:
         # Generic: extract any MAC addresses
         seen = set()
