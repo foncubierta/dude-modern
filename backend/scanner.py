@@ -60,18 +60,24 @@ def get_local_networks() -> list[str]:
         return ["192.168.1.0/24"]
 
 
+async def _try_port(ip: str, port: int) -> Optional[int]:
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port), timeout=0.3
+        )
+        writer.close()
+        return port
+    except Exception:
+        return None
+
+
 async def check_web_port(ip: str) -> tuple[Optional[int], str]:
-    """Comprueba si el dispositivo tiene algún puerto web abierto."""
+    """Comprueba puertos web en paralelo."""
+    results = await asyncio.gather(*[_try_port(ip, p) for p in COMMON_WEB_PORTS])
     for port in COMMON_WEB_PORTS:
-        try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(ip, port), timeout=0.5
-            )
-            writer.close()
+        if port in results:
             protocol = "https" if port in (443, 8443) else "http"
             return port, protocol
-        except Exception:
-            continue
     return None, "http"
 
 
@@ -79,7 +85,7 @@ def run_nmap_scan(network: str) -> list[dict]:
     """Ejecuta nmap en una subred y retorna lista de hosts encontrados."""
     nm = nmap.PortScanner()
     try:
-        nm.scan(hosts=network, arguments="-sn --host-timeout 5s")
+        nm.scan(hosts=network, arguments="-sn --host-timeout 3s --max-retries 1 --min-rate 500")
     except Exception as e:
         print(f"nmap error on {network}: {e}")
         return []
