@@ -18,32 +18,21 @@ async def add_monitor(
 ) -> int:
     """Create a monitor in Uptime Kuma. Returns the new monitor ID."""
     def _do():
-        from uptime_kuma_api import UptimeKumaApi
+        from uptime_kuma_api import UptimeKumaApi, MonitorType
         api = UptimeKumaApi(uk_url)
         try:
             api.login(user, password)
-            # Use api.call() directly so we can include 'conditions'
-            # which newer UK versions require (NOT NULL) but the library ignores.
-            monitor = {
-                "name": name,
-                "type": "http" if is_http else "ping",
-                "interval": 60,
-                "maxretries": 1,
-                "retryInterval": 60,
-                "timeout": 48,
-                "upsideDown": False,
-                "notificationIDList": {},
-                "conditions": [],          # required by UK ≥ 2.x
-                "accepted_statuscodes": ["200-299"],
-            }
+            # conditions=[] required by newer Uptime Kuma versions (NOT NULL constraint)
             if is_http:
-                monitor["url"] = target
+                r = api.add_monitor(
+                    type=MonitorType.HTTP, name=name, url=target,
+                    interval=60, conditions=[],
+                )
             else:
-                monitor["hostname"] = target
-
-            r = api.call("add", monitor)
-            if not r.get("ok"):
-                raise Exception(r.get("msg", "Unknown error from Uptime Kuma"))
+                r = api.add_monitor(
+                    type=MonitorType.PING, name=name, hostname=target,
+                    interval=60, conditions=[],
+                )
             return r["monitorID"]
         finally:
             try:
