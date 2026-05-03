@@ -22,17 +22,21 @@ async def add_monitor(
         api = UptimeKumaApi(uk_url)
         try:
             api.login(user, password)
-            # conditions=[] required by newer Uptime Kuma versions (NOT NULL constraint)
+
+            # Newer UK versions require 'conditions' (NOT NULL) but the library
+            # doesn't know about it. Patch _build_monitor_data to inject it.
+            _original_build = api._build_monitor_data
+            def _patched_build(**kwargs):
+                data = _original_build(**kwargs)
+                data.setdefault("conditions", [])
+                return data
+            api._build_monitor_data = _patched_build
+
             if is_http:
-                r = api.add_monitor(
-                    type=MonitorType.HTTP, name=name, url=target,
-                    interval=60, conditions=[],
-                )
+                r = api.add_monitor(type=MonitorType.HTTP, name=name, url=target, interval=60)
             else:
-                r = api.add_monitor(
-                    type=MonitorType.PING, name=name, hostname=target,
-                    interval=60, conditions=[],
-                )
+                r = api.add_monitor(type=MonitorType.PING, name=name, hostname=target, interval=60)
+
             return r["monitorID"]
         finally:
             try:
