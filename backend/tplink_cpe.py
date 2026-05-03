@@ -1,22 +1,23 @@
 """
 TP-Link CPE (Pharos OS 2.x) REST client.
-Tested with CPE210/CPE510 running Pharos OS 2.2.x
+Uses urllib (sync) wrapped in asyncio.to_thread — more tolerant of
+non-standard HTTP responses from embedded servers.
 
 Auth flow:
-  POST http://<ip>/  {"method":"do","login":{"username":"...","password":"<md5_lower>"}}
+  POST http://<ip>/  {"method":"do","login":{"username":"...","password":"<md5>"}}
   → {"stok":"<token>","error_code":0}
-
-Subsequent requests:
-  POST http://<ip>/stok=<token>/ds  {<query>}
 """
 
+import asyncio
 import hashlib
+import json as _json
+import ssl
+import urllib.error
+import urllib.request
 from typing import Optional
 
-import httpx
-
 _stok_cache: dict[str, str] = {}
-_base_url_cache: dict[str, str] = {}   # ip -> "http://..." or "https://..."
+_scheme_cache: dict[str, str] = {}   # ip -> "http" or "https"
 
 
 def _md5(password: str) -> str:
@@ -24,54 +25,71 @@ def _md5(password: str) -> str:
     return hashlib.md5(password.encode()).hexdigest()
 
 
-async def _detect_base_url(ip: str) -> str:
-    """Try HTTP first, then HTTPS. Return working base URL."""
-    if ip in _base_url_cache:
-        return _base_url_cache[ip]
-    for scheme in ("http", "https"):
-        url = f"{scheme}://{ip}/"
-        try:
-            async with httpx.AsyncClient(verify=False, timeout=5, follow_redirects=False) as c:
-                resp = await c.get(url)
-                # Any response (even 302/401) means the server is there
-                _base_url_cache[ip] = f"{scheme}://{ip}"
-                return _base_url_cache[ip]
-        except Exception:
-            continue
-    # Default fallback
-    _base_url_cache[ip] = f"http://{ip}"
-    return _base_url_cache[ip]
+def _ssl_ctx() -> ssl.SSLContext:
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
 
 
-def _client(ip: str, base: str) -> httpx.AsyncClient:
-    return httpx.AsyncClient(
-        verify=False,
-        timeout=8,
-        http1=True,
-        http2=False,
-        follow_redirects=True,
+def _do_post(url: str, payload: dict, referer: str) -> dict:
+    """Synchronous POST — called via asyncio.to_thread."""
+    data = _json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
         headers={
             "Content-Type": "application/json",
-            "Referer": f"{base}/",
-            "Origin": base,
+            "Referer": referer,
+            "Origin": referer.rstrip("/"),
+            "Connection": "close",
         },
     )
+    ctx = _ssl_ctx()
+    with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
+        body = resp.read().decode("utf-8", errors="replace")
+        return _json.loads(body)
+
+
+def _detect_scheme_sync(ip: str) -> str:
+    """Try HTTP first, then HTTPS. Return working scheme."""
+    for scheme in ("http", "https"):
+        url = f"{scheme}://{ip}/"
+        req = urllib.request.Request(url, method="GET")
+        try:
+            ctx = _ssl_ctx()
+            with urllib.request.urlopen(req, timeout=5, context=ctx):
+                return scheme
+        except urllib.error.HTTPError:
+            # Got an HTTP error response — server IS there
+            return scheme
+        except Exception:
+            continue
+    return "http"
+
+
+async def _get_scheme(ip: str) -> str:
+    if ip not in _scheme_cache:
+        scheme = await asyncio.to_thread(_detect_scheme_sync, ip)
+        _scheme_cache[ip] = scheme
+        print(f"[tplink_cpe] {ip} using {scheme}")
+    return _scheme_cache[ip]
 
 
 async def _login(ip: str, user: str, password: str) -> Optional[str]:
-    base = await _detect_base_url(ip)
+    scheme = await _get_scheme(ip)
+    base = f"{scheme}://{ip}"
     url = f"{base}/"
     payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
     try:
-        async with _client(ip, base) as client:
-            resp = await client.post(url, json=payload)
-            print(f"[tplink_cpe] login {ip} status={resp.status_code} body={resp.text[:300]}")
-            data = resp.json()
-            stok = data.get("stok", "")
-            if stok:
-                _stok_cache[ip] = stok
-                return stok
-            print(f"[tplink_cpe] login {ip} no stok: error_code={data.get('error_code')}")
+        data = await asyncio.to_thread(_do_post, url, payload, base + "/")
+        print(f"[tplink_cpe] login {ip} response: {str(data)[:300]}")
+        stok = data.get("stok", "")
+        if stok:
+            _stok_cache[ip] = stok
+            return stok
+        print(f"[tplink_cpe] login {ip} failed: error_code={data.get('error_code')}")
     except Exception as e:
         print(f"[tplink_cpe] login {ip} error: {type(e).__name__}: {e}")
     return None
@@ -82,22 +100,20 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
     if not stok:
         return None
 
-    base = _base_url_cache.get(ip, f"http://{ip}")
+    scheme = _scheme_cache.get(ip, "http")
+    base = f"{scheme}://{ip}"
     url = f"{base}/stok={stok}/ds"
     try:
-        async with _client(ip, base) as client:
-            resp = await client.post(url, json=payload)
-            data = resp.json()
-            if data.get("error_code") == -40401:
-                # Token expired — re-login once
-                _stok_cache.pop(ip, None)
-                stok = await _login(ip, user, password)
-                if not stok:
-                    return None
-                url = f"{base}/stok={stok}/ds"
-                resp = await client.post(url, json=payload)
-                data = resp.json()
-            return data
+        data = await asyncio.to_thread(_do_post, url, payload, base + "/")
+        if data.get("error_code") == -40401:
+            # Token expired — re-login once
+            _stok_cache.pop(ip, None)
+            stok = await _login(ip, user, password)
+            if not stok:
+                return None
+            url = f"{base}/stok={stok}/ds"
+            data = await asyncio.to_thread(_do_post, url, payload, base + "/")
+        return data
     except Exception as e:
         print(f"[tplink_cpe] request {ip} error: {type(e).__name__}: {e}")
         _stok_cache.pop(ip, None)
@@ -112,21 +128,9 @@ async def get_stations(ip: str, user: str, password: str) -> list[dict]:
     })
     if not data:
         return []
-
     stations = data.get("wireless", {}).get("wlan_station_list", [])
     if isinstance(stations, list):
         return stations
     if isinstance(stations, dict):
         return list(stations.values())
     return []
-
-
-async def get_status(ip: str, user: str, password: str) -> Optional[dict]:
-    """Return basic device status (mode, SSID, channel, etc.)"""
-    data = await _post(ip, user, password, {
-        "method": "get",
-        "wireless": {"wlan": {"name": "wlan"}},
-    })
-    if not data:
-        return None
-    return data.get("wireless", {}).get("wlan")
