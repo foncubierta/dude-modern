@@ -57,15 +57,21 @@ export function EditModal({ device, devices, onSave, onClose }) {
   return (
     <div className={styles.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className={styles.modal}>
-        <div className={styles.header}>
-          <h2 className={styles.title}>Edit Device</h2>
-          <button className={styles.close} onClick={onClose}><X size={18} /></button>
+
+        {/* ── Sticky header ── */}
+        <div className={styles.modalHeader}>
+          <div className={styles.header}>
+            <h2 className={styles.title}>Edit Device</h2>
+            <button className={styles.close} onClick={onClose}><X size={18} /></button>
+          </div>
+          <div className={styles.info}>
+            <span className={styles.ip}>{device.ip}</span>
+            {device.mac && <span className={styles.mac}>{device.mac}</span>}
+          </div>
         </div>
 
-        <div className={styles.info}>
-          <span className={styles.ip}>{device.ip}</span>
-          {device.mac && <span className={styles.mac}>{device.mac}</span>}
-        </div>
+        {/* ── Scrollable body ── */}
+        <div className={styles.body}>
 
         <div className={styles.field}>
           <label>Label</label>
@@ -310,10 +316,16 @@ export function EditModal({ device, devices, onSave, onClose }) {
           </div>
         </div>
 
-        <div className={styles.footer}>
-          <button className={styles.cancel} onClick={onClose}>Cancel</button>
-          <button className={styles.save} onClick={handleSave}>Save</button>
+        </div>{/* end .body */}
+
+        {/* ── Sticky footer ── */}
+        <div className={styles.modalFooter}>
+          <div className={styles.footer}>
+            <button className={styles.cancel} onClick={onClose}>Cancel</button>
+            <button className={styles.save} onClick={handleSave}>Save</button>
+          </div>
         </div>
+
       </div>
     </div>
   );

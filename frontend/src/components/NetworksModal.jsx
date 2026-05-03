@@ -63,99 +63,109 @@ export function NetworksModal({ onClose }) {
   return (
     <div className={styles.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className={styles.modal}>
-        <div className={styles.header}>
-          <div className={styles.titleRow}>
-            <Network size={18} color="var(--accent)" />
-            <h2 className={styles.title}>Network Subnets</h2>
+
+        {/* ── Sticky header ── */}
+        <div className={styles.modalHeader}>
+          <div className={styles.header}>
+            <div className={styles.titleRow}>
+              <Network size={18} color="var(--accent)" />
+              <h2 className={styles.title}>Network Subnets</h2>
+            </div>
+            <button className={styles.close} onClick={onClose}><X size={18} /></button>
           </div>
-          <button className={styles.close} onClick={onClose}><X size={18} /></button>
+          <p className={styles.desc}>
+            All configured subnets are scanned in parallel. Add as many as you need.
+          </p>
         </div>
 
-        <p className={styles.desc}>
-          All configured subnets are scanned in parallel. Add as many as you need.
-        </p>
+        {/* ── Scrollable body ── */}
+        <div className={styles.body}>
+          {/* Detected automatically */}
+          {detected.length > 0 && (
+            <section className={styles.section}>
+              <div className={styles.sectionHeader}>
+                <span>Detected on host</span>
+                <button className={styles.refreshBtn} onClick={load} title="Refresh">
+                  <RefreshCw size={12} />
+                </button>
+              </div>
+              <div className={styles.chips}>
+                {detected.map((net) => {
+                  const isAdded = configured.includes(net);
+                  return (
+                    <div key={net} className={`${styles.chip} ${isAdded ? styles.chipAdded : ""}`}>
+                      <span>{net}</span>
+                      {!isAdded && (
+                        <button className={styles.chipAdd} onClick={() => addNetwork(net)} title="Add">
+                          <Plus size={11} />
+                        </button>
+                      )}
+                      {isAdded && <span className={styles.chipCheck}>✓</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
-        {/* Detected automatically */}
-        {detected.length > 0 && (
+          {/* Configured list */}
           <section className={styles.section}>
             <div className={styles.sectionHeader}>
-              <span>Detected on host</span>
-              <button className={styles.refreshBtn} onClick={load} title="Refresh">
-                <RefreshCw size={12} />
+              <span>Configured networks ({configured.length})</span>
+            </div>
+            {loading ? (
+              <div className={styles.empty}>Loading…</div>
+            ) : configured.length === 0 ? (
+              <div className={styles.empty}>No networks configured yet.</div>
+            ) : (
+              <ul className={styles.list}>
+                {configured.map((net) => (
+                  <li key={net} className={styles.listItem}>
+                    <code className={styles.cidr}>{net}</code>
+                    {detected.includes(net) && <span className={styles.badge}>local</span>}
+                    <button
+                      className={styles.removeBtn}
+                      onClick={() => removeNetwork(net)}
+                      title="Remove"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Manual add */}
+          <section className={styles.section}>
+            <div className={styles.sectionHeader}><span>Add manually</span></div>
+            <div className={styles.addRow}>
+              <input
+                className={styles.input}
+                placeholder="e.g. 10.0.0.0/24"
+                value={newNet}
+                onChange={(e) => setNewNet(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addNetwork(newNet)}
+              />
+              <button
+                className={styles.addBtn}
+                onClick={() => addNetwork(newNet)}
+                disabled={!newNet.trim()}
+              >
+                <Plus size={15} /> Add
               </button>
             </div>
-            <div className={styles.chips}>
-              {detected.map((net) => {
-                const isAdded = configured.includes(net);
-                return (
-                  <div key={net} className={`${styles.chip} ${isAdded ? styles.chipAdded : ""}`}>
-                    <span>{net}</span>
-                    {!isAdded && (
-                      <button className={styles.chipAdd} onClick={() => addNetwork(net)} title="Add">
-                        <Plus size={11} />
-                      </button>
-                    )}
-                    {isAdded && <span className={styles.chipCheck}>✓</span>}
-                  </div>
-                );
-              })}
-            </div>
+            {error && <div className={styles.error}>{error}</div>}
           </section>
-        )}
-
-        {/* Configured list */}
-        <section className={styles.section}>
-          <div className={styles.sectionHeader}>
-            <span>Configured networks ({configured.length})</span>
-          </div>
-          {loading ? (
-            <div className={styles.empty}>Loading…</div>
-          ) : configured.length === 0 ? (
-            <div className={styles.empty}>No networks configured yet.</div>
-          ) : (
-            <ul className={styles.list}>
-              {configured.map((net) => (
-                <li key={net} className={styles.listItem}>
-                  <code className={styles.cidr}>{net}</code>
-                  {detected.includes(net) && <span className={styles.badge}>local</span>}
-                  <button
-                    className={styles.removeBtn}
-                    onClick={() => removeNetwork(net)}
-                    title="Remove"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-
-        {/* Manual add */}
-        <section className={styles.section}>
-          <div className={styles.sectionHeader}><span>Add manually</span></div>
-          <div className={styles.addRow}>
-            <input
-              className={styles.input}
-              placeholder="e.g. 10.0.0.0/24"
-              value={newNet}
-              onChange={(e) => setNewNet(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addNetwork(newNet)}
-            />
-            <button
-              className={styles.addBtn}
-              onClick={() => addNetwork(newNet)}
-              disabled={!newNet.trim()}
-            >
-              <Plus size={15} /> Add
-            </button>
-          </div>
-          {error && <div className={styles.error}>{error}</div>}
-        </section>
-
-        <div className={styles.footer}>
-          <button className={styles.doneBtn} onClick={onClose}>Done</button>
         </div>
+
+        {/* ── Sticky footer ── */}
+        <div className={styles.modalFooter}>
+          <div className={styles.footer}>
+            <button className={styles.doneBtn} onClick={onClose}>Done</button>
+          </div>
+        </div>
+
       </div>
     </div>
   );
