@@ -175,7 +175,14 @@ async def scan_networks(networks: list[str], scan_id: int):
             ip = h["ip"]
             icon, vendor = guess_icon_and_vendor(h["vendor_raw"])
 
-            existing = session.exec(select(Device).where(Device.ip == ip)).first()
+            # Look up by MAC first so multi-homed devices (router with IPs in
+            # multiple subnets) don't get created as separate records
+            existing = None
+            if h["mac"]:
+                existing = session.exec(select(Device).where(Device.mac == h["mac"])).first()
+            if not existing:
+                existing = session.exec(select(Device).where(Device.ip == ip)).first()
+
             if existing:
                 existing.is_online = True
                 existing.last_seen = datetime.utcnow()

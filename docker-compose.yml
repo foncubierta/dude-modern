@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
     network_mode: host
     volumes:
-      - ./data:/app/data
+      - dude_data:/app/data
     environment:
       - DATABASE_URL=sqlite:////app/data/dude.db
       - PORT=8099
@@ -20,3 +20,7 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       - backend
+
+volumes:
+  dude_data:
+    name: dude_data
