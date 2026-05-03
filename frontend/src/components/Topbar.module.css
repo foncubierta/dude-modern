@@ -1,0 +1,96 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 8px;
+}
+
+.brandName {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+
+.nav {
+  display: flex;
+  gap: 2px;
+}
+
+.navBtn {
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-weight: 500;
+  transition: color 0.15s, background 0.15s;
+}
+
+.navBtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.navBtn.active { background: var(--accent-dim); color: var(--accent); }
+
+.right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.statGroup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.statOnline { color: var(--success); display: flex; align-items: center; gap: 4px; }
+.statOffline { color: var(--text-muted); display: flex; align-items: center; gap: 4px; }
+.statTotal { color: var(--text-secondary); }
+.statNetworks { color: var(--accent); display: flex; align-items: center; gap: 4px; font-size: 11px; }
+
+.networksBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  transition: background 0.15s, color 0.15s;
+}
+.networksBtn:hover { background: var(--border); color: var(--text-primary); }
+
+.scanBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent);
+  color: #000;
+  font-weight: 600;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: var(--radius);
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.scanBtn:hover:not(:disabled) { background: var(--accent-hover); }
+.scanBtn:disabled { opacity: 0.6; cursor: default; }
+.scanBtn.scanning { background: var(--bg-hover); color: var(--text-secondary); }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }

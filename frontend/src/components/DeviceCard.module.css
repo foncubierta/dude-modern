@@ -1,0 +1,77 @@
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+.card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim), 0 4px 16px rgba(0,0,0,0.3);
+}
+
+.online { border-left: 3px solid var(--success); }
+.offline { border-left: 3px solid var(--text-muted); opacity: 0.75; }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.iconWrap {
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.iconOnline { background: rgba(63, 185, 80, 0.12); color: var(--success); }
+.iconOffline { background: var(--bg-hover); color: var(--text-muted); }
+
+.status {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; }
+.dotOnline { background: var(--success); box-shadow: 0 0 6px var(--success); }
+.dotOffline { background: var(--text-muted); }
+
+.body { display: flex; flex-direction: column; gap: 3px; }
+
+.name {
+  font-weight: 600; font-size: 15px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.ip { font-family: "SF Mono", "Fira Code", monospace; font-size: 13px; color: var(--accent); }
+.vendor { font-size: 12px; color: var(--text-secondary); }
+.mac { font-family: monospace; font-size: 11px; color: var(--text-muted); }
+.network {
+  font-family: monospace; font-size: 10px;
+  color: var(--accent); opacity: 0.7;
+  background: var(--accent-dim);
+  border-radius: 4px; padding: 1px 5px;
+  display: inline-block; margin-top: 2px;
+  width: fit-content;
+}
+
+.actions {
+  display: flex; gap: 6px; margin-top: 4px;
+}
+
+.actionBtn {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex; align-items: center; justify-content: center;
+  text-decoration: none;
+  transition: background 0.15s, color 0.15s;
+  flex: 1;
+}
+.actionBtn:hover { background: var(--border); color: var(--text-primary); }
+.actionBtn.danger:hover { background: rgba(248, 81, 73, 0.15); color: var(--danger); }
