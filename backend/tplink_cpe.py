@@ -10,11 +10,10 @@ Subsequent requests:
   POST http://<ip>/stok=<token>/ds  {<query>}
 """
 
-import asyncio
 import hashlib
 from typing import Optional
 
-import aiohttp
+import httpx
 
 # Per-device session cache: ip -> stok token
 _stok_cache: dict[str, str] = {}
@@ -28,17 +27,13 @@ async def _login(ip: str, user: str, password: str) -> Optional[str]:
     url = f"http://{ip}/"
     payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=payload,
-                timeout=aiohttp.ClientTimeout(total=6),
-                ssl=False,
-            ) as resp:
-                data = await resp.json(content_type=None)
-                stok = data.get("stok", "")
-                if stok:
-                    _stok_cache[ip] = stok
-                    return stok
+        async with httpx.AsyncClient(verify=False, timeout=6) as client:
+            resp = await client.post(url, json=payload)
+            data = resp.json()
+            stok = data.get("stok", "")
+            if stok:
+                _stok_cache[ip] = stok
+                return stok
     except Exception as e:
         print(f"[tplink_cpe] login {ip} error: {e}")
     return None
@@ -51,27 +46,19 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
 
     url = f"http://{ip}/stok={stok}/ds"
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json=payload,
-                timeout=aiohttp.ClientTimeout(total=6),
-                ssl=False,
-            ) as resp:
-                data = await resp.json(content_type=None)
-                if data.get("error_code") == -40401:
-                    # Token expired — re-login once
-                    _stok_cache.pop(ip, None)
-                    stok = await _login(ip, user, password)
-                    if not stok:
-                        return None
-                    url = f"http://{ip}/stok={stok}/ds"
-                    async with session.post(
-                        url, json=payload,
-                        timeout=aiohttp.ClientTimeout(total=6),
-                        ssl=False,
-                    ) as resp2:
-                        data = await resp2.json(content_type=None)
-                return data
+        async with httpx.AsyncClient(verify=False, timeout=6) as client:
+            resp = await client.post(url, json=payload)
+            data = resp.json()
+            if data.get("error_code") == -40401:
+                # Token expired — re-login once
+                _stok_cache.pop(ip, None)
+                stok = await _login(ip, user, password)
+                if not stok:
+                    return None
+                url = f"http://{ip}/stok={stok}/ds"
+                resp = await client.post(url, json=payload)
+                data = resp.json()
+            return data
     except Exception as e:
         print(f"[tplink_cpe] request {ip} error: {e}")
         _stok_cache.pop(ip, None)
@@ -93,11 +80,8 @@ async def get_stations(ip: str, user: str, password: str) -> list[dict]:
     stations = data.get("wireless", {}).get("wlan_station_list", [])
     if isinstance(stations, list):
         return stations
-
-    # Some firmware versions wrap it differently
     if isinstance(stations, dict):
         return list(stations.values())
-
     return []
 
 
