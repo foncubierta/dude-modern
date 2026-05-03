@@ -183,6 +183,10 @@ async def scan_networks(networks: list[str], scan_id: int):
             if not existing:
                 existing = session.exec(select(Device).where(Device.ip == ip)).first()
 
+            # Don't recreate or update soft-deleted devices
+            if existing and existing.is_deleted:
+                continue
+
             if existing:
                 existing.is_online = True
                 existing.last_seen = datetime.utcnow()

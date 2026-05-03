@@ -1,0 +1,65 @@
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(4px);
+}
+
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  width: 480px; max-width: 95vw;
+  padding: 24px;
+  display: flex; flex-direction: column; gap: 14px;
+  box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+}
+
+.header { display: flex; align-items: center; justify-content: space-between; }
+.title { font-size: 16px; font-weight: 700; }
+.close {
+  background: transparent; color: var(--text-secondary);
+  border-radius: 6px; padding: 4px; display: flex;
+}
+.close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.desc { font-size: 12px; color: var(--text-muted); margin: 0; }
+
+.empty { text-align: center; color: var(--text-muted); font-size: 13px; padding: 20px 0; }
+
+.list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+.item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.icon { color: var(--text-muted); flex-shrink: 0; }
+
+.info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ip { font-family: monospace; font-size: 11px; color: var(--accent); }
+.net { font-size: 10px; color: var(--text-muted); }
+
+.restoreBtn {
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(63,185,80,0.12);
+  color: var(--success);
+  border: 1px solid rgba(63,185,80,0.3);
+  border-radius: var(--radius);
+  padding: 5px 10px; font-size: 12px; font-weight: 600;
+  white-space: nowrap; flex-shrink: 0;
+  transition: background 0.15s;
+}
+.restoreBtn:hover { background: rgba(63,185,80,0.22); }
+
+.footer { display: flex; justify-content: flex-end; }
+.doneBtn {
+  background: var(--bg-hover); color: var(--text-secondary);
+  border-radius: var(--radius); padding: 8px 16px; font-weight: 500;
+}
+.doneBtn:hover { color: var(--text-primary); }

@@ -15,6 +15,7 @@ _MIGRATIONS = [
     "ALTER TABLE device ADD COLUMN alias_of INTEGER REFERENCES device(id)",
     "ALTER TABLE device ADD COLUMN edgeswitch_user TEXT",
     "ALTER TABLE device ADD COLUMN edgeswitch_pass TEXT",
+    "ALTER TABLE device ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
 ]
 
 

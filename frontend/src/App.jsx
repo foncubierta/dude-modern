@@ -4,15 +4,17 @@ import { NetworkMap } from "./components/NetworkMap";
 import { GridView } from "./components/GridView";
 import { EditModal } from "./components/EditModal";
 import { NetworksModal } from "./components/NetworksModal";
+import { TrashModal } from "./components/TrashModal";
 import { useDevices } from "./useDevices";
 import styles from "./App.module.css";
 
 export default function App() {
-  const { devices, stats, scanStatus, topology, traffic, loading, triggerScan, updateDevice, deleteDevice } =
+  const { devices, stats, scanStatus, topology, traffic, loading, triggerScan, updateDevice, deleteDevice, refresh } =
     useDevices();
   const [view, setView] = useState("map");
   const [editing, setEditing] = useState(null);
   const [showNetworks, setShowNetworks] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
 
   const handleMove = useCallback(
     (id, x, y) => updateDevice(id, { x, y }),
@@ -44,6 +46,7 @@ export default function App() {
         view={view}
         onViewChange={setView}
         onNetworks={() => setShowNetworks(true)}
+        onTrash={() => setShowTrash(true)}
       />
 
       <main className={styles.main}>
@@ -76,6 +79,10 @@ export default function App() {
 
       {showNetworks && (
         <NetworksModal onClose={() => setShowNetworks(false)} />
+      )}
+
+      {showTrash && (
+        <TrashModal onClose={() => setShowTrash(false)} onRestored={refresh} />
       )}
     </div>
   );

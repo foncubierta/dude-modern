@@ -12,8 +12,10 @@ async function req(path, opts = {}) {
 export const api = {
   devices: {
     list: () => req("/devices"),
+    deleted: () => req("/devices/deleted"),
     update: (id, body) => req(`/devices/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     delete: (id) => req(`/devices/${id}`, { method: "DELETE" }),
+    restore: (id) => req(`/devices/${id}/restore`, { method: "POST" }),
   },
   scan: {
     trigger: () => req("/scan", { method: "POST" }),

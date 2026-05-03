@@ -61,6 +61,14 @@
 .statTotal { color: var(--text-secondary); }
 .statNetworks { color: var(--accent); display: flex; align-items: center; gap: 4px; font-size: 11px; }
 
+.trashBtn {
+  background: transparent; color: var(--text-muted);
+  border-radius: var(--radius); padding: 6px 8px;
+  display: flex; align-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+.trashBtn:hover { background: rgba(248,81,73,0.15); color: #f85149; }
+
 .networksBtn {
   display: flex;
   align-items: center;

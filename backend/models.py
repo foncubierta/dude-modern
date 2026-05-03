@@ -25,6 +25,7 @@ class Device(SQLModel, table=True):
     edgeswitch_user: Optional[str] = None
     edgeswitch_pass: Optional[str] = None
     alias_of: Optional[int] = Field(default=None, foreign_key="device.id")
+    is_deleted: bool = Field(default=False)
 
 
 class ScanLog(SQLModel, table=True):

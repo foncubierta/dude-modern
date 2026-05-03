@@ -55,7 +55,7 @@ async def enrich_hostnames_from_mikrotik():
             for lease in leases:
                 mac = lease.get("mac-address", "").upper()
                 hostname = (
-                    lease.get("active-host-name")
+                    lease.get("active-hostname")
                     or lease.get("host-name")
                     or ""
                 ).strip()
@@ -135,7 +135,12 @@ app.add_middleware(
 
 @app.get("/api/devices")
 def list_devices(session: Session = Depends(get_session)):
-    return session.exec(select(Device).order_by(Device.ip)).all()
+    return session.exec(select(Device).where(Device.is_deleted == False).order_by(Device.ip)).all()
+
+
+@app.get("/api/devices/deleted")
+def list_deleted_devices(session: Session = Depends(get_session)):
+    return session.exec(select(Device).where(Device.is_deleted == True).order_by(Device.ip)).all()
 
 
 @app.get("/api/devices/{device_id}")
@@ -180,9 +185,22 @@ def delete_device(device_id: int, session: Session = Depends(get_session)):
     d = session.get(Device, device_id)
     if not d:
         raise HTTPException(404, "Device not found")
-    session.delete(d)
+    d.is_deleted = True
+    session.add(d)
     session.commit()
     return {"ok": True}
+
+
+@app.post("/api/devices/{device_id}/restore")
+def restore_device(device_id: int, session: Session = Depends(get_session)):
+    d = session.get(Device, device_id)
+    if not d:
+        raise HTTPException(404, "Device not found")
+    d.is_deleted = False
+    session.add(d)
+    session.commit()
+    session.refresh(d)
+    return d
 
 
 # ── Scan ─────────────────────────────────────────────────────────────────────
