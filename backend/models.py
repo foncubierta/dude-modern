@@ -24,6 +24,8 @@ class Device(SQLModel, table=True):
     mikrotik_pass: Optional[str] = None
     edgeswitch_user: Optional[str] = None
     edgeswitch_pass: Optional[str] = None
+    tplink_user: Optional[str] = None
+    tplink_pass: Optional[str] = None
     alias_of: Optional[int] = Field(default=None, foreign_key="device.id")
     is_deleted: bool = Field(default=False)
 

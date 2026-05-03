@@ -16,6 +16,7 @@ from models import Device, ScanLog, Settings
 from scanner import scan_networks, get_local_networks
 import mikrotik
 import edgeswitch
+import tplink_cpe
 
 
 scheduler = AsyncIOScheduler()
@@ -172,6 +173,8 @@ class DeviceUpdate(BaseModel):
     mikrotik_pass: Optional[str] = None
     edgeswitch_user: Optional[str] = None
     edgeswitch_pass: Optional[str] = None
+    tplink_user: Optional[str] = None
+    tplink_pass: Optional[str] = None
     alias_of: Optional[int] = None
 
 
@@ -443,6 +446,26 @@ async def get_topology(session: Session = Depends(get_session)):
                         continue
                     unique_links = [l for l in unique_links if l["target"] != target.id]
                     unique_links.append({"source": es_dev.id, "target": target.id})
+
+    # TP-Link CPE: topology via wireless station list
+    cpe_devices = [d for d in devices if d.tplink_user and d.tplink_pass]
+    if cpe_devices:
+        station_results = await asyncio.gather(
+            *[tplink_cpe.get_stations(d.ip, d.tplink_user, d.tplink_pass) for d in cpe_devices],
+            return_exceptions=True,
+        )
+        for cpe_dev, stations in zip(cpe_devices, station_results):
+            if isinstance(stations, Exception) or not stations:
+                continue
+            for station in stations:
+                mac = station.get("mac", "").upper()
+                if not mac:
+                    continue
+                target = mac_to_device.get(mac)
+                if target and target.id != cpe_dev.id and target.id not in aliased_ids:
+                    # CPE clients can be on any subnet — no subnet restriction
+                    unique_links = [l for l in unique_links if l["target"] != target.id]
+                    unique_links.append({"source": cpe_dev.id, "target": target.id})
 
     return {"links": unique_links, "aliases": list(aliased_ids)}
 

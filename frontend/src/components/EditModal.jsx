@@ -14,6 +14,8 @@ export function EditModal({ device, devices, onSave, onClose }) {
     mikrotik_pass: device.mikrotik_pass || "",
     edgeswitch_user: device.edgeswitch_user || "",
     edgeswitch_pass: device.edgeswitch_pass || "",
+    tplink_user: device.tplink_user || "",
+    tplink_pass: device.tplink_pass || "",
     alias_of: device.alias_of ?? "",
   });
   const [showMikrotik, setShowMikrotik] = useState(
@@ -21,6 +23,9 @@ export function EditModal({ device, devices, onSave, onClose }) {
   );
   const [showEdgeSwitch, setShowEdgeSwitch] = useState(
     !!(device.edgeswitch_user || device.edgeswitch_pass)
+  );
+  const [showTplink, setShowTplink] = useState(
+    !!(device.tplink_user || device.tplink_pass)
   );
 
   function set(key, val) {
@@ -38,6 +43,8 @@ export function EditModal({ device, devices, onSave, onClose }) {
       mikrotik_pass: form.mikrotik_pass || null,
       edgeswitch_user: form.edgeswitch_user || null,
       edgeswitch_pass: form.edgeswitch_pass || null,
+      tplink_user: form.tplink_user || null,
+      tplink_pass: form.tplink_pass || null,
       alias_of: form.alias_of ? Number(form.alias_of) : null,
     });
     onClose();
@@ -196,6 +203,43 @@ export function EditModal({ device, devices, onSave, onClose }) {
                     type="password"
                     value={form.edgeswitch_pass}
                     onChange={(e) => set("edgeswitch_pass", e.target.value)}
+                    placeholder="••••••"
+                    autoComplete="new-password"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className={styles.section}>
+          <button className={styles.sectionToggle} onClick={() => setShowTplink((v) => !v)}>
+            {showTplink ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            TP-Link CPE API
+            {form.tplink_user && <span className={styles.badge}>configured</span>}
+          </button>
+          {showTplink && (
+            <div className={styles.sectionBody}>
+              <p className={styles.hint}>
+                Enables topology from wireless station list (connected clients).
+                Uses Pharos OS REST API (port 80). Password hashed as MD5.
+              </p>
+              <div className={styles.row}>
+                <div className={styles.field}>
+                  <label>Username</label>
+                  <input
+                    value={form.tplink_user}
+                    onChange={(e) => set("tplink_user", e.target.value)}
+                    placeholder="admin"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className={styles.field}>
+                  <label>Password</label>
+                  <input
+                    type="password"
+                    value={form.tplink_pass}
+                    onChange={(e) => set("tplink_pass", e.target.value)}
                     placeholder="••••••"
                     autoComplete="new-password"
                   />
