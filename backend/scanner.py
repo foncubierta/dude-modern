@@ -85,7 +85,7 @@ def run_nmap_scan(network: str) -> list[dict]:
     """Ejecuta nmap en una subred y retorna lista de hosts encontrados."""
     nm = nmap.PortScanner()
     try:
-        nm.scan(hosts=network, arguments="-sn --host-timeout 3s --max-retries 1 --min-rate 500")
+        nm.scan(hosts=network, arguments="-sn --host-timeout 10s --max-retries 3 --min-rate 100")
     except Exception as e:
         print(f"nmap error on {network}: {e}")
         return []
