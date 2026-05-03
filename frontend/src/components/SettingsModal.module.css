@@ -11,31 +11,37 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   width: 460px; max-width: 95vw;
+  max-height: 90vh;
+  overflow-y: auto;
   display: flex; flex-direction: column;
   box-shadow: 0 24px 48px rgba(0,0,0,0.5);
-  max-height: 90vh;
 }
+.modal::-webkit-scrollbar { width: 6px; }
+.modal::-webkit-scrollbar-track { background: transparent; }
+.modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.modal::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 .modalHeader {
-  padding: 20px 24px 0;
-  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-card);
+  padding: 20px 24px 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   padding: 16px 24px;
   display: flex; flex-direction: column; gap: 14px;
+  flex: 1;
 }
-.body::-webkit-scrollbar { width: 6px; }
-.body::-webkit-scrollbar-track { background: transparent; }
-.body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-.body::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
 .modalFooter {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  background: var(--bg-card);
   padding: 12px 24px 20px;
-  flex-shrink: 0;
   border-top: 1px solid var(--border);
 }
 
