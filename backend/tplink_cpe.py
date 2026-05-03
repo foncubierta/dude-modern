@@ -78,7 +78,7 @@ async def _get_scheme(ip: str) -> str:
 
 
 def _do_get(url: str) -> str:
-    """Synchronous GET — returns response body."""
+    """Synchronous GET — returns response body or error string."""
     req = urllib.request.Request(url, method="GET", headers={"Connection": "close"})
     ctx = _ssl_ctx()
     try:
@@ -86,6 +86,8 @@ def _do_get(url: str) -> str:
             return resp.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as e:
         return f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
+    except Exception as e:
+        return f"ERROR {type(e).__name__}: {e}"
 
 
 # Candidate login paths for different Pharos OS versions
