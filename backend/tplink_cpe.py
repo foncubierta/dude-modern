@@ -77,21 +77,50 @@ async def _get_scheme(ip: str) -> str:
     return _scheme_cache[ip]
 
 
+def _do_get(url: str) -> str:
+    """Synchronous GET — returns response body."""
+    req = urllib.request.Request(url, method="GET", headers={"Connection": "close"})
+    ctx = _ssl_ctx()
+    try:
+        with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
+
+
+# Candidate login paths for different Pharos OS versions
+_LOGIN_PATHS = ["/", "/cgi-bin/luci/", "/cgi-bin/luci"]
+
+
 async def _login(ip: str, user: str, password: str) -> Optional[str]:
     scheme = await _get_scheme(ip)
     base = f"{scheme}://{ip}"
-    url = f"{base}/"
     payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
-    try:
-        data = await asyncio.to_thread(_do_post, url, payload, base + "/")
-        print(f"[tplink_cpe] login {ip} response: {str(data)[:300]}")
-        stok = data.get("stok", "")
-        if stok:
-            _stok_cache[ip] = stok
-            return stok
-        print(f"[tplink_cpe] login {ip} failed: error_code={data.get('error_code')}")
-    except Exception as e:
-        print(f"[tplink_cpe] login {ip} error: {type(e).__name__}: {e}")
+
+    # Debug: show what the root page looks like
+    root_body = await asyncio.to_thread(_do_get, f"{base}/")
+    print(f"[tplink_cpe] GET {ip}/ => {root_body[:300]}")
+
+    for path in _LOGIN_PATHS:
+        url = f"{base}{path}"
+        try:
+            data = await asyncio.to_thread(_do_post, url, payload, base + "/")
+            print(f"[tplink_cpe] login {ip} path={path} response: {str(data)[:300]}")
+            stok = data.get("stok", "")
+            if stok:
+                _stok_cache[ip] = stok
+                _stok_cache[f"{ip}__path"] = path  # remember working path
+                return stok
+            if data.get("error_code") not in (None, -404, 404):
+                # Got a real response (even an error) — this is the right path
+                print(f"[tplink_cpe] login {ip} path={path} error_code={data.get('error_code')}")
+                break
+        except urllib.error.HTTPError as e:
+            print(f"[tplink_cpe] login {ip} path={path} HTTP {e.code}")
+            continue
+        except Exception as e:
+            print(f"[tplink_cpe] login {ip} path={path} error: {type(e).__name__}: {e}")
+            continue
     return None
 
 
@@ -102,7 +131,8 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
 
     scheme = _scheme_cache.get(ip, "http")
     base = f"{scheme}://{ip}"
-    url = f"{base}/stok={stok}/ds"
+    login_path = _stok_cache.get(f"{ip}__path", "/")
+    url = f"{base}{login_path}stok={stok}/ds"
     try:
         data = await asyncio.to_thread(_do_post, url, payload, base + "/")
         if data.get("error_code") == -40401:
@@ -111,7 +141,7 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
             stok = await _login(ip, user, password)
             if not stok:
                 return None
-            url = f"{base}/stok={stok}/ds"
+            url = f"{base}{login_path}stok={stok}/ds"
             data = await asyncio.to_thread(_do_post, url, payload, base + "/")
         return data
     except Exception as e:
