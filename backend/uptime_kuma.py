@@ -22,10 +22,17 @@ async def add_monitor(
         api = UptimeKumaApi(uk_url)
         try:
             api.login(user, password)
+            # conditions=[] required by newer Uptime Kuma versions (NOT NULL constraint)
             if is_http:
-                r = api.add_monitor(type=MonitorType.HTTP, name=name, url=target, interval=60)
+                r = api.add_monitor(
+                    type=MonitorType.HTTP, name=name, url=target,
+                    interval=60, conditions=[],
+                )
             else:
-                r = api.add_monitor(type=MonitorType.PING, name=name, hostname=target, interval=60)
+                r = api.add_monitor(
+                    type=MonitorType.PING, name=name, hostname=target,
+                    interval=60, conditions=[],
+                )
             return r["monitorID"]
         finally:
             try:
