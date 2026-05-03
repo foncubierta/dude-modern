@@ -103,7 +103,29 @@ _LOGIN_CANDIDATES = [
 ]
 
 
+def _read_root(ip: str) -> str:
+    """GET https://<ip>/ and return first 600 chars of body (for debugging)."""
+    for scheme in ("https", "http"):
+        try:
+            req = urllib.request.Request(
+                f"{scheme}://{ip}/", method="GET",
+                headers={"Connection": "close"},
+            )
+            with urllib.request.urlopen(req, timeout=8, context=_ssl_ctx()) as resp:
+                return resp.read().decode("utf-8", errors="replace")[:600]
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")[:600]
+            return f"HTTP {e.code} body: {body}"
+        except Exception as e:
+            continue
+    return "unreachable"
+
+
 async def _login(ip: str, user: str, password: str) -> Optional[str]:
+    # One-time: dump root page to find correct API path
+    root = await asyncio.to_thread(_read_root, ip)
+    print(f"[tplink_cpe] ROOT {ip}: {root}", flush=True)
+
     payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
 
     for scheme, path in _LOGIN_CANDIDATES:
