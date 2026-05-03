@@ -1,3 +1,4 @@
+import ipaddress
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -13,6 +14,7 @@ from pydantic import BaseModel
 from database import create_db, engine, get_session
 from models import Device, ScanLog, Settings
 from scanner import scan_networks, get_local_networks
+import mikrotik
 
 
 scheduler = AsyncIOScheduler()
@@ -105,6 +107,8 @@ class DeviceUpdate(BaseModel):
     y: Optional[float] = None
     tags: Optional[str] = None
     network: Optional[str] = None
+    mikrotik_user: Optional[str] = None
+    mikrotik_pass: Optional[str] = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -232,6 +236,84 @@ def set_setting(key: str, body: SettingUpdate, session: Session = Depends(get_se
         session.add(s)
     session.commit()
     return {"key": key, "value": body.value}
+
+
+# ── Topology ─────────────────────────────────────────────────────────────────
+
+def _gateway_for_network(cidr: str, devices: list[Device]) -> Optional[Device]:
+    try:
+        net = ipaddress.ip_network(cidr, strict=False)
+        gw_ip = str(next(net.hosts()))
+        for d in devices:
+            if d.ip == gw_ip:
+                return d
+        for d in devices:
+            if d.icon in ("router", "ap", "switch"):
+                return d
+        return devices[0] if devices else None
+    except Exception:
+        return None
+
+
+@app.get("/api/topology")
+async def get_topology(session: Session = Depends(get_session)):
+    devices = session.exec(select(Device)).all()
+
+    by_network: dict[str, list[Device]] = {}
+    for d in devices:
+        if d.network:
+            by_network.setdefault(d.network, []).append(d)
+
+    links: list[dict] = []
+    for cidr, net_devs in by_network.items():
+        gw = _gateway_for_network(cidr, net_devs)
+        if gw:
+            for d in net_devs:
+                if d.id != gw.id:
+                    links.append({"source": gw.id, "target": d.id})
+
+    mt_devices = [d for d in devices if d.mikrotik_user and d.mikrotik_pass]
+    if mt_devices:
+        arp_results = await asyncio.gather(
+            *[mikrotik.get_arp_table(d.ip, d.mikrotik_user, d.mikrotik_pass) for d in mt_devices],
+            return_exceptions=True,
+        )
+        mac_to_device = {d.mac.upper(): d for d in devices if d.mac}
+        for mt_dev, arp in zip(mt_devices, arp_results):
+            if isinstance(arp, Exception) or not arp:
+                continue
+            for entry in arp:
+                mac = entry.get("mac-address", "").upper()
+                target = mac_to_device.get(mac)
+                if target and target.id != mt_dev.id:
+                    links = [l for l in links if l["target"] != target.id]
+                    links.append({"source": mt_dev.id, "target": target.id})
+
+    return {"links": links}
+
+
+# ── Traffic ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/traffic")
+async def get_traffic_stats(session: Session = Depends(get_session)):
+    mt_devices = session.exec(
+        select(Device).where(Device.mikrotik_user.isnot(None))
+    ).all()
+
+    if not mt_devices:
+        return {"devices": {}}
+
+    results = await asyncio.gather(
+        *[mikrotik.get_traffic(d.id, d.ip, d.mikrotik_user, d.mikrotik_pass) for d in mt_devices],
+        return_exceptions=True,
+    )
+
+    traffic = {}
+    for d, res in zip(mt_devices, results):
+        if not isinstance(res, Exception):
+            traffic[str(d.id)] = res
+
+    return {"devices": traffic}
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import { useDevices } from "./useDevices";
 import styles from "./App.module.css";
 
 export default function App() {
-  const { devices, stats, scanStatus, loading, triggerScan, updateDevice, deleteDevice } =
+  const { devices, stats, scanStatus, topology, traffic, loading, triggerScan, updateDevice, deleteDevice } =
     useDevices();
   const [view, setView] = useState("map");
   const [editing, setEditing] = useState(null);
@@ -50,6 +50,8 @@ export default function App() {
         {view === "map" ? (
           <NetworkMap
             devices={devices}
+            topology={topology}
+            traffic={traffic}
             onEdit={setEditing}
             onDelete={handleDelete}
             onMove={handleMove}

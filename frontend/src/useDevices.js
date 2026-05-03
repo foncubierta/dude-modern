@@ -5,18 +5,22 @@ export function useDevices() {
   const [devices, setDevices] = useState([]);
   const [stats, setStats] = useState({ total: 0, online: 0, offline: 0 });
   const [scanStatus, setScanStatus] = useState({ running: false, latest: null });
+  const [topology, setTopology] = useState({ links: [] });
+  const [traffic, setTraffic] = useState({ devices: {} });
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
-      const [devs, st, scan] = await Promise.all([
+      const [devs, st, scan, topo] = await Promise.all([
         api.devices.list(),
         api.stats(),
         api.scan.status(),
+        api.topology(),
       ]);
       setDevices(devs);
       setStats(st);
       setScanStatus(scan);
+      setTopology(topo);
     } catch (e) {
       console.error(e);
     } finally {
@@ -24,16 +28,29 @@ export function useDevices() {
     }
   }, []);
 
+  const refreshTraffic = useCallback(async () => {
+    try {
+      const t = await api.traffic();
+      setTraffic(t);
+    } catch (e) {
+      // silently ignore if no MikroTik devices configured
+    }
+  }, []);
+
   useEffect(() => {
     refresh();
-    const id = setInterval(refresh, 10000);
-    return () => clearInterval(id);
-  }, [refresh]);
+    const devicesTimer = setInterval(refresh, 10000);
+    const trafficTimer = setInterval(refreshTraffic, 5000);
+    refreshTraffic();
+    return () => {
+      clearInterval(devicesTimer);
+      clearInterval(trafficTimer);
+    };
+  }, [refresh, refreshTraffic]);
 
   const triggerScan = useCallback(async () => {
     await api.scan.trigger();
     setScanStatus((s) => ({ ...s, running: true }));
-    // Poll until done
     const poll = setInterval(async () => {
       const s = await api.scan.status();
       setScanStatus(s);
@@ -55,5 +72,8 @@ export function useDevices() {
     setDevices((prev) => prev.filter((d) => d.id !== id));
   }, []);
 
-  return { devices, stats, scanStatus, loading, refresh, triggerScan, updateDevice, deleteDevice };
+  return {
+    devices, stats, scanStatus, topology, traffic,
+    loading, refresh, triggerScan, updateDevice, deleteDevice,
+  };
 }

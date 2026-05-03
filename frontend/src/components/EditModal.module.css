@@ -67,6 +67,29 @@
 .iconBtn:hover { border-color: var(--accent); color: var(--accent); }
 .iconActive { border-color: var(--accent) !important; background: var(--accent-dim) !important; color: var(--accent) !important; }
 
+.section { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+
+.sectionToggle {
+  width: 100%; display: flex; align-items: center; gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  border: none; cursor: pointer; text-align: left;
+  transition: background 0.15s;
+}
+.sectionToggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.badge {
+  margin-left: auto;
+  background: var(--accent-dim); color: var(--accent);
+  border-radius: 4px; padding: 1px 6px; font-size: 10px; text-transform: none;
+}
+
+.sectionBody { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+.hint { font-size: 11px; color: var(--text-muted); margin: 0; line-height: 1.5; }
+
 .footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 .cancel {

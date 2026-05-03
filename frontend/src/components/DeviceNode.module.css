@@ -76,6 +76,18 @@
 .btn:hover { background: var(--border); color: #e6edf3; }
 .btn.danger:hover { background: rgba(248,81,73,0.15); color: #f85149; }
 
+.traffic {
+  display: flex; gap: 4px; align-items: center;
+  margin-top: 3px; justify-content: center;
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 9px;
+  background: rgba(63,185,80,0.08);
+  border-radius: 3px; padding: 2px 5px;
+}
+.trafficDown { color: #3fb950; }
+.trafficUp { color: #00b4d8; }
+.trafficUnit { color: #8b949e; }
+
 .handle {
   width: 8px !important; height: 8px !important;
   background: var(--border) !important;

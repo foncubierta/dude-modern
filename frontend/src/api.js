@@ -26,4 +26,6 @@ export const api = {
   },
   networks: () => req("/networks"),
   stats: () => req("/stats"),
+  topology: () => req("/topology"),
+  traffic: () => req("/traffic"),
 };

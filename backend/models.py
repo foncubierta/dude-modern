@@ -18,8 +18,10 @@ class Device(SQLModel, table=True):
     y: float = 100.0
     first_seen: datetime = Field(default_factory=datetime.utcnow)
     last_seen: Optional[datetime] = None
-    tags: Optional[str] = None  # JSON string de lista de tags
-    network: Optional[str] = None  # subred donde fue descubierto
+    tags: Optional[str] = None
+    network: Optional[str] = None
+    mikrotik_user: Optional[str] = None
+    mikrotik_pass: Optional[str] = None
 
 
 class ScanLog(SQLModel, table=True):

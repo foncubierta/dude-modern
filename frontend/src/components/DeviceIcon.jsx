@@ -1,10 +1,11 @@
 import {
   Router, Server, Monitor, Smartphone, Camera,
-  Wifi, HelpCircle, Printer, Tv
+  Wifi, HelpCircle, Printer, Tv, Radio
 } from "lucide-react";
 
 const ICONS = {
   router: Router,
+  ap: Radio,
   switch: Wifi,
   server: Server,
   pc: Monitor,

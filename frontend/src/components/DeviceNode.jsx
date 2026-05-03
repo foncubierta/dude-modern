@@ -5,11 +5,12 @@ import { DeviceIcon } from "./DeviceIcon";
 import styles from "./DeviceNode.module.css";
 
 export const DeviceNode = memo(({ data }) => {
-  const { device, onEdit, onDelete } = data;
+  const { device, traffic, onEdit, onDelete } = data;
   const displayName = device.label || device.hostname || device.ip;
   const webUrl = device.web_port
     ? `${device.web_protocol}://${device.ip}:${device.web_port}`
     : null;
+  const hasTraffic = traffic && (traffic.rx_mbps > 0 || traffic.tx_mbps > 0);
 
   return (
     <div className={`${styles.node} ${device.is_online ? styles.online : styles.offline}`}>
@@ -25,6 +26,13 @@ export const DeviceNode = memo(({ data }) => {
         <div className={styles.ip}>{device.ip}</div>
         {device.vendor && <div className={styles.vendor}>{device.vendor}</div>}
         {device.network && <div className={styles.network}>{device.network}</div>}
+        {hasTraffic && (
+          <div className={styles.traffic}>
+            <span className={styles.trafficDown}>↓{traffic.rx_mbps}</span>
+            <span className={styles.trafficUp}>↑{traffic.tx_mbps}</span>
+            <span className={styles.trafficUnit}>Mbps</span>
+          </div>
+        )}
       </div>
 
       <div className={styles.actions}>
