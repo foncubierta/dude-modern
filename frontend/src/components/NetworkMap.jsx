@@ -1,10 +1,11 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ReactFlow, Background, Controls, MiniMap,
   useNodesState, useEdgesState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { DeviceNode } from "./DeviceNode";
+import { DeviceIcon, ICON_TYPES } from "./DeviceIcon";
 import styles from "./NetworkMap.module.css";
 
 const nodeTypes = { device: DeviceNode };
@@ -38,19 +39,34 @@ function buildEdges(topology, traffic) {
 export function NetworkMap({ devices, topology, traffic, onEdit, onDelete, onMove }) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [activeFilters, setActiveFilters] = useState(new Set());
+
+  // Which icon types actually exist in the current device list
+  const presentTypes = [...new Set(devices.map((d) => d.icon || "unknown"))];
+
+  function toggleFilter(type) {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      next.has(type) ? next.delete(type) : next.add(type);
+      return next;
+    });
+  }
 
   useEffect(() => {
     const aliasedIds = new Set(topology?.aliases ?? []);
-    setNodes(devices
-      .filter((d) => !aliasedIds.has(d.id))
-      .map((d) => ({
-        id: String(d.id),
-        type: "device",
-        position: { x: d.x, y: d.y },
-        data: { device: d, traffic: traffic?.devices?.[String(d.id)], onEdit, onDelete },
-        draggable: true,
-      })));
-  }, [devices, topology, traffic, onEdit, onDelete]);
+    const filtered = devices.filter((d) => {
+      if (aliasedIds.has(d.id)) return false;
+      if (activeFilters.size === 0) return true;
+      return activeFilters.has(d.icon || "unknown");
+    });
+    setNodes(filtered.map((d) => ({
+      id: String(d.id),
+      type: "device",
+      position: { x: d.x, y: d.y },
+      data: { device: d, traffic: traffic?.devices?.[String(d.id)], onEdit, onDelete },
+      draggable: true,
+    })));
+  }, [devices, topology, traffic, onEdit, onDelete, activeFilters]);
 
   useEffect(() => {
     setEdges(buildEdges(topology, traffic));
@@ -63,6 +79,29 @@ export function NetworkMap({ devices, topology, traffic, onEdit, onDelete, onMov
 
   return (
     <div className={styles.wrap}>
+      {/* Filter bar — only show if there are multiple types */}
+      {presentTypes.length > 1 && (
+        <div className={styles.filterBar}>
+          <span className={styles.filterLabel}>Filter:</span>
+          {ICON_TYPES.filter((t) => presentTypes.includes(t)).map((type) => (
+            <button
+              key={type}
+              className={`${styles.filterBtn} ${activeFilters.has(type) ? styles.active : ""}`}
+              onClick={() => toggleFilter(type)}
+              title={`Show only ${type}`}
+            >
+              <DeviceIcon type={type} size={12} />
+              {type}
+            </button>
+          ))}
+          {activeFilters.size > 0 && (
+            <button className={styles.filterClear} onClick={() => setActiveFilters(new Set())}>
+              Clear
+            </button>
+          )}
+        </div>
+      )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
