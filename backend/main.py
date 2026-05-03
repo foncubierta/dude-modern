@@ -172,7 +172,7 @@ def update_device(device_id: int, body: DeviceUpdate, session: Session = Depends
     d = session.get(Device, device_id)
     if not d:
         raise HTTPException(404, "Device not found")
-    for field, val in body.model_dump(exclude_none=True).items():
+    for field, val in body.model_dump(exclude_unset=True).items():
         setattr(d, field, val)
     session.add(d)
     session.commit()
