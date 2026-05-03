@@ -1,194 +1,113 @@
 """
-TP-Link CPE (Pharos OS 2.x) REST client.
-Pharos OS 2.2.x API: POST https://<ip>/ with JSON, stok-based auth.
+TP-Link CPE (Pharos OS / OpenWrt) SSH client.
+Uses paramiko to SSH into the CPE and run wireless client commands.
+
+Requires SSH to be enabled on the CPE (usually on by default in Pharos OS).
+Uses the same admin credentials as the web interface.
 """
 
 import asyncio
-import hashlib
-import json as _json
-import ssl
-import urllib.error
-import urllib.request
+import re
 from typing import Optional
 
-_stok_cache: dict[str, str] = {}
-_scheme_cache: dict[str, str] = {}
+import paramiko
 
 
-def _md5(password: str) -> str:
-    return hashlib.md5(password.encode()).hexdigest()
-
-
-def _ssl_ctx() -> ssl.SSLContext:
-    """Permissive SSL — CPE uses self-signed cert + old TLS ciphers."""
-    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    ctx.set_ciphers("ALL:@SECLEVEL=0")
-    try:
-        ctx.minimum_version = ssl.TLSVersion.TLSv1
-    except AttributeError:
-        pass
-    return ctx
-
-
-def _detect_scheme_sync(ip: str) -> str:
+def _get_stations_ssh(ip: str, user: str, password: str) -> list[dict]:
     """
-    Detect scheme by sending GET without following redirects.
-    If Location header points to https, return https.
+    SSH into CPE and return list of associated wireless clients.
+    Tries multiple commands in order of preference.
     """
-    class _NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
-            return None  # block all redirects
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-    opener = urllib.request.build_opener(
-        _NoRedirect(),
-        urllib.request.HTTPSHandler(context=_ssl_ctx()),
-    )
     try:
-        opener.open(f"http://{ip}/", timeout=5)
-        return "http"
-    except urllib.error.HTTPError as e:
-        loc = e.headers.get("Location", "")
-        print(f"[tplink_cpe] redirect {ip} → {loc}", flush=True)
-        if "https" in loc:
-            return "https"
-        return "http"
-    except Exception:
-        pass
+        client.connect(
+            ip, port=22,
+            username=user, password=password,
+            timeout=10,
+            allow_agent=False,
+            look_for_keys=False,
+        )
 
-    # Fall back: try HTTPS directly
-    try:
-        req = urllib.request.Request(f"https://{ip}/", method="GET")
-        with urllib.request.urlopen(req, timeout=5, context=_ssl_ctx()) as _:
-            return "https"
-    except urllib.error.HTTPError:
-        return "https"  # got HTTP response = HTTPS is up
-    except Exception:
-        pass
+        # Try commands in order — stop at first one that works
+        commands = [
+            "iwinfo wlan0 assoclist",
+            "iw dev wlan0 station dump",
+            "iw wlan1 station dump",          # some CPEs use wlan1
+            "cat /proc/net/arp",              # fallback: ARP table
+        ]
 
-    return "http"
+        for cmd in commands:
+            try:
+                _, stdout, _ = client.exec_command(cmd, timeout=8)
+                output = stdout.read().decode("utf-8", errors="replace").strip()
+                if output:
+                    stations = _parse_stations(output, cmd)
+                    if stations:
+                        print(f"[tplink_cpe] {ip} SSH '{cmd}' → {len(stations)} clients", flush=True)
+                        return stations
+            except Exception:
+                continue
 
-
-async def _get_scheme(ip: str) -> str:
-    if ip not in _scheme_cache:
-        scheme = await asyncio.to_thread(_detect_scheme_sync, ip)
-        _scheme_cache[ip] = scheme
-        print(f"[tplink_cpe] {ip} using {scheme}", flush=True)
-    return _scheme_cache[ip]
-
-
-def _do_post(url: str, payload: dict, referer: str) -> dict:
-    """Synchronous POST."""
-    data = _json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data, method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Referer": referer,
-            "Origin": referer.rstrip("/"),
-            "Connection": "close",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=8, context=_ssl_ctx()) as resp:
-        return _json.loads(resp.read().decode("utf-8", errors="replace"))
-
-
-# Try all combinations: both schemes × multiple paths
-_LOGIN_CANDIDATES = [
-    ("https", "/"),
-    ("http",  "/"),
-    ("https", "/cgi-bin/luci/"),
-    ("http",  "/cgi-bin/luci/"),
-]
-
-
-def _read_root(ip: str) -> str:
-    """GET https://<ip>/ and return first 600 chars of body (for debugging)."""
-    for scheme in ("https", "http"):
-        try:
-            req = urllib.request.Request(
-                f"{scheme}://{ip}/", method="GET",
-                headers={"Connection": "close"},
-            )
-            with urllib.request.urlopen(req, timeout=8, context=_ssl_ctx()) as resp:
-                return resp.read().decode("utf-8", errors="replace")[:600]
-        except urllib.error.HTTPError as e:
-            body = e.read().decode("utf-8", errors="replace")[:600]
-            return f"HTTP {e.code} body: {body}"
-        except Exception as e:
-            continue
-    return "unreachable"
-
-
-async def _login(ip: str, user: str, password: str) -> Optional[str]:
-    # One-time: dump root page to find correct API path
-    root = await asyncio.to_thread(_read_root, ip)
-    print(f"[tplink_cpe] ROOT {ip}: {root}", flush=True)
-
-    payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
-
-    for scheme, path in _LOGIN_CANDIDATES:
-        base = f"{scheme}://{ip}"
-        url = f"{base}{path}"
-        try:
-            data = await asyncio.to_thread(_do_post, url, payload, base + "/")
-            print(f"[tplink_cpe] login {ip} {scheme}{path} → {str(data)[:200]}", flush=True)
-            stok = data.get("stok", "")
-            if stok:
-                _stok_cache[ip] = stok
-                _stok_cache[f"{ip}__base"] = base
-                _stok_cache[f"{ip}__path"] = path
-                return stok
-            err = data.get("error_code")
-            if err is not None and err not in (-404, 404):
-                # Real response on this path — credentials wrong or other error
-                print(f"[tplink_cpe] login {ip} error_code={err}", flush=True)
-                return None  # No point trying other paths
-        except urllib.error.HTTPError as e:
-            print(f"[tplink_cpe] login {ip} {scheme}{path} HTTP {e.code}", flush=True)
-        except Exception as e:
-            print(f"[tplink_cpe] login {ip} {scheme}{path} {type(e).__name__}: {e}", flush=True)
-
-    return None
-
-
-async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[dict]:
-    stok = _stok_cache.get(ip) or await _login(ip, user, password)
-    if not stok:
-        return None
-
-    base = _stok_cache.get(f"{ip}__base", f"http://{ip}")
-    path = _stok_cache.get(f"{ip}__path", "/")
-    url = f"{base}{path}stok={stok}/ds"
-    try:
-        data = await asyncio.to_thread(_do_post, url, payload, base + "/")
-        if data.get("error_code") == -40401:
-            _stok_cache.pop(ip, None)
-            stok = await _login(ip, user, password)
-            if not stok:
-                return None
-            url = f"{base}{path}stok={stok}/ds"
-            data = await asyncio.to_thread(_do_post, url, payload, base + "/")
-        return data
     except Exception as e:
-        print(f"[tplink_cpe] request {ip} {type(e).__name__}: {e}", flush=True)
-        _stok_cache.pop(ip, None)
-    return None
+        print(f"[tplink_cpe] SSH {ip} error: {type(e).__name__}: {e}", flush=True)
+    finally:
+        client.close()
+
+    return []
+
+
+def _parse_stations(output: str, cmd: str) -> list[dict]:
+    """Parse MAC addresses from iwinfo/iw/arp output."""
+    stations = []
+    mac_re = re.compile(r"([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5})")
+
+    if "assoclist" in cmd:
+        # iwinfo wlan0 assoclist:
+        # AA:BB:CC:DD:EE:FF  -65 dBm / -95 dBm (SNR 30)  0 ms ago
+        for line in output.splitlines():
+            line = line.strip()
+            m = mac_re.match(line)
+            if m:
+                entry = {"mac": m.group(1).upper()}
+                # Parse signal
+                sig = re.search(r"(-\d+)\s*dBm", line)
+                if sig:
+                    entry["signal"] = int(sig.group(1))
+                stations.append(entry)
+
+    elif "station dump" in cmd:
+        # iw dev wlan0 station dump:
+        # Station AA:BB:CC:DD:EE:FF (on wlan0)
+        #   signal: -65 dBm
+        current: dict = {}
+        for line in output.splitlines():
+            m = re.match(r"Station\s+([0-9A-Fa-f:]{17})", line.strip())
+            if m:
+                if current:
+                    stations.append(current)
+                current = {"mac": m.group(1).upper()}
+            elif current:
+                sig = re.search(r"signal:\s*(-\d+)", line)
+                if sig:
+                    current["signal"] = int(sig.group(1))
+        if current:
+            stations.append(current)
+
+    else:
+        # Generic: extract any MAC addresses
+        seen = set()
+        for mac in mac_re.findall(output):
+            mac = mac.upper()
+            if mac not in seen:
+                seen.add(mac)
+                stations.append({"mac": mac})
+
+    return stations
 
 
 async def get_stations(ip: str, user: str, password: str) -> list[dict]:
-    """Return list of connected wireless clients."""
-    print(f"[tplink_cpe] get_stations called for {ip}", flush=True)
-    data = await _post(ip, user, password, {
-        "method": "get",
-        "wireless": {"wlan_station_list": {"name": "station_table"}},
-    })
-    if not data:
-        return []
-    stations = data.get("wireless", {}).get("wlan_station_list", [])
-    if isinstance(stations, list):
-        return stations
-    if isinstance(stations, dict):
-        return list(stations.values())
-    return []
+    """Return list of connected wireless clients via SSH."""
+    print(f"[tplink_cpe] get_stations SSH {ip}", flush=True)
+    return await asyncio.to_thread(_get_stations_ssh, ip, user, password)

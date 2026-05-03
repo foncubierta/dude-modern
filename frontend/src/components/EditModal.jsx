@@ -221,8 +221,8 @@ export function EditModal({ device, devices, onSave, onClose }) {
           {showTplink && (
             <div className={styles.sectionBody}>
               <p className={styles.hint}>
-                Enables topology from wireless station list (connected clients).
-                Uses Pharos OS REST API (port 80). Password hashed as MD5.
+                Enables topology from wireless station list via SSH (port 22).
+                Uses the same credentials as the web interface.
               </p>
               <div className={styles.row}>
                 <div className={styles.field}>
