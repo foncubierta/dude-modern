@@ -47,29 +47,37 @@ async def enrich_hostnames_from_mikrotik():
             return_exceptions=True,
         )
 
-        # Build MAC -> active-hostname map from all MikroTik routers
+        # Build MAC -> hostname and IP -> hostname maps from all MikroTik routers
         mac_to_hostname: dict[str, str] = {}
+        ip_to_hostname: dict[str, str] = {}
         for leases in lease_results:
             if isinstance(leases, Exception) or not leases:
                 continue
             for lease in leases:
                 mac = lease.get("mac-address", "").upper()
+                ip = (lease.get("active-address") or lease.get("address") or "").strip()
                 hostname = (
                     lease.get("active-hostname")
                     or lease.get("host-name")
                     or ""
                 ).strip()
-                if mac and hostname:
-                    mac_to_hostname[mac] = hostname
+                if hostname:
+                    if mac:
+                        mac_to_hostname[mac] = hostname
+                    if ip:
+                        ip_to_hostname[ip] = hostname
 
-        if not mac_to_hostname:
+        if not mac_to_hostname and not ip_to_hostname:
             return
 
         updated = False
         for device in session.exec(select(Device)).all():
-            if not device.mac:
-                continue
-            name = mac_to_hostname.get(device.mac.upper())
+            # Prefer MAC match (more reliable), fall back to IP match
+            name = None
+            if device.mac:
+                name = mac_to_hostname.get(device.mac.upper())
+            if not name:
+                name = ip_to_hostname.get(device.ip)
             if name and name != device.hostname:
                 device.hostname = name
                 updated = True
