@@ -69,6 +69,28 @@
 }
 .trashBtn:hover { background: rgba(248,81,73,0.15); color: #f85149; }
 
+.settingsBtn {
+  background: transparent; color: var(--text-muted);
+  border-radius: var(--radius); padding: 6px 8px;
+  display: flex; align-items: center;
+  transition: background 0.15s, color 0.15s;
+}
+.settingsBtn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.addDeviceBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 6px 12px;
+  border-radius: var(--radius);
+  transition: background 0.15s, color 0.15s;
+}
+.addDeviceBtn:hover { background: var(--accent); color: #000; }
+
 .networksBtn {
   display: flex;
   align-items: center;

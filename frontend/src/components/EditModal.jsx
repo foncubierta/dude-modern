@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { X, ChevronDown, ChevronRight } from "lucide-react";
+import { X, ChevronDown, ChevronRight, BellPlus, BellOff, Loader } from "lucide-react";
 import { DeviceIcon, ICON_TYPES } from "./DeviceIcon";
+import { api } from "../api";
 import styles from "./EditModal.module.css";
 
 export function EditModal({ device, devices, onSave, onClose }) {
@@ -27,6 +28,9 @@ export function EditModal({ device, devices, onSave, onClose }) {
   const [showTplink, setShowTplink] = useState(
     !!(device.tplink_user || device.tplink_pass)
   );
+  const [monitorLoading, setMonitorLoading] = useState(false);
+  const [monitorId, setMonitorId] = useState(device.monitor_id ?? null);
+  const [monitorError, setMonitorError] = useState("");
 
   function set(key, val) {
     setForm((f) => ({ ...f, [key]: val }));
@@ -247,6 +251,63 @@ export function EditModal({ device, devices, onSave, onClose }) {
               </div>
             </div>
           )}
+        </div>
+
+        <div className={styles.section}>
+          <button className={styles.sectionToggle} onClick={() => {}}>
+            <BellPlus size={13} />
+            Uptime Kuma
+            {monitorId && <span className={styles.badge}>monitoring</span>}
+            {device.alert_status === "down" && <span className={styles.badgeDown}>DOWN</span>}
+          </button>
+          <div className={styles.sectionBody}>
+            <p className={styles.hint}>
+              Add or remove this device from Uptime Kuma monitoring.
+              Configure the Uptime Kuma connection in Settings first.
+            </p>
+            {monitorError && <p className={styles.monitorError}>{monitorError}</p>}
+            {monitorId ? (
+              <button
+                className={styles.monitorRemoveBtn}
+                disabled={monitorLoading}
+                onClick={async () => {
+                  setMonitorLoading(true);
+                  setMonitorError("");
+                  try {
+                    await api.uptimeKuma.removeMonitor(device.id);
+                    setMonitorId(null);
+                  } catch (e) {
+                    setMonitorError(e.message);
+                  } finally {
+                    setMonitorLoading(false);
+                  }
+                }}
+              >
+                {monitorLoading ? <Loader size={13} className={styles.spin} /> : <BellOff size={13} />}
+                Remove monitor
+              </button>
+            ) : (
+              <button
+                className={styles.monitorAddBtn}
+                disabled={monitorLoading}
+                onClick={async () => {
+                  setMonitorLoading(true);
+                  setMonitorError("");
+                  try {
+                    const r = await api.uptimeKuma.addMonitor(device.id);
+                    setMonitorId(r.monitor_id ?? true);
+                  } catch (e) {
+                    setMonitorError(e.message);
+                  } finally {
+                    setMonitorLoading(false);
+                  }
+                }}
+              >
+                {monitorLoading ? <Loader size={13} className={styles.spin} /> : <BellPlus size={13} />}
+                Add monitor
+              </button>
+            )}
+          </div>
         </div>
 
         <div className={styles.footer}>

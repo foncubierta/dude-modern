@@ -30,4 +30,14 @@ export const api = {
   stats: () => req("/stats"),
   topology: () => req("/topology"),
   traffic: () => req("/traffic"),
+  uptimeKuma: {
+    getSettings: () => req("/uptime-kuma/settings"),
+    saveSettings: (body) => req("/uptime-kuma/settings", { method: "PUT", body: JSON.stringify(body) }),
+    test: () => req("/uptime-kuma/test", { method: "POST" }),
+    addMonitor: (id) => req(`/devices/${id}/monitor`, { method: "POST" }),
+    removeMonitor: (id) => req(`/devices/${id}/monitor`, { method: "DELETE" }),
+  },
+  manualDevice: {
+    create: (body) => req("/devices/manual", { method: "POST", body: JSON.stringify(body) }),
+  },
 };

@@ -28,6 +28,9 @@ class Device(SQLModel, table=True):
     tplink_pass: Optional[str] = None
     alias_of: Optional[int] = Field(default=None, foreign_key="device.id")
     is_deleted: bool = Field(default=False)
+    is_manual: bool = Field(default=False)
+    monitor_id: Optional[int] = None
+    alert_status: Optional[str] = None  # "up", "down", or None
 
 
 class ScanLog(SQLModel, table=True):

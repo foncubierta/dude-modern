@@ -5,6 +5,8 @@ import { GridView } from "./components/GridView";
 import { EditModal } from "./components/EditModal";
 import { NetworksModal } from "./components/NetworksModal";
 import { TrashModal } from "./components/TrashModal";
+import { SettingsModal } from "./components/SettingsModal";
+import { AddDeviceModal } from "./components/AddDeviceModal";
 import { useDevices } from "./useDevices";
 import styles from "./App.module.css";
 
@@ -15,6 +17,8 @@ export default function App() {
   const [editing, setEditing] = useState(null);
   const [showNetworks, setShowNetworks] = useState(false);
   const [showTrash, setShowTrash] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAddDevice, setShowAddDevice] = useState(false);
 
   const handleMove = useCallback(
     (id, x, y) => updateDevice(id, { x, y }),
@@ -47,6 +51,8 @@ export default function App() {
         onViewChange={setView}
         onNetworks={() => setShowNetworks(true)}
         onTrash={() => setShowTrash(true)}
+        onSettings={() => setShowSettings(true)}
+        onAddDevice={() => setShowAddDevice(true)}
       />
 
       <main className={styles.main}>
@@ -83,6 +89,17 @@ export default function App() {
 
       {showTrash && (
         <TrashModal onClose={() => setShowTrash(false)} onRestored={refresh} />
+      )}
+
+      {showSettings && (
+        <SettingsModal onClose={() => setShowSettings(false)} />
+      )}
+
+      {showAddDevice && (
+        <AddDeviceModal
+          onClose={() => setShowAddDevice(false)}
+          onCreated={() => refresh()}
+        />
       )}
     </div>
   );

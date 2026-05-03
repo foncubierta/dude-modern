@@ -18,6 +18,9 @@ _MIGRATIONS = [
     "ALTER TABLE device ADD COLUMN is_deleted INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE device ADD COLUMN tplink_user TEXT",
     "ALTER TABLE device ADD COLUMN tplink_pass TEXT",
+    "ALTER TABLE device ADD COLUMN is_manual INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE device ADD COLUMN monitor_id INTEGER",
+    "ALTER TABLE device ADD COLUMN alert_status TEXT",
 ]
 
 

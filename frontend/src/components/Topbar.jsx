@@ -1,7 +1,7 @@
-import { RefreshCw, Wifi, WifiOff, Activity, Network, Trash2 } from "lucide-react";
+import { RefreshCw, Wifi, WifiOff, Activity, Network, Trash2, Settings, Plus } from "lucide-react";
 import styles from "./Topbar.module.css";
 
-export function Topbar({ stats, scanStatus, onScan, view, onViewChange, onNetworks, onTrash }) {
+export function Topbar({ stats, scanStatus, onScan, view, onViewChange, onNetworks, onTrash, onSettings, onAddDevice }) {
   return (
     <header className={styles.topbar}>
       <div className={styles.brand}>
@@ -45,6 +45,15 @@ export function Topbar({ stats, scanStatus, onScan, view, onViewChange, onNetwor
 
         <button className={styles.trashBtn} onClick={onTrash} title="Deleted devices">
           <Trash2 size={14} />
+        </button>
+
+        <button className={styles.settingsBtn} onClick={onSettings} title="Settings">
+          <Settings size={14} />
+        </button>
+
+        <button className={styles.addDeviceBtn} onClick={onAddDevice} title="Add external device">
+          <Plus size={14} />
+          Add Device
         </button>
 
         <button className={styles.networksBtn} onClick={onNetworks} title="Manage subnets">

@@ -17,6 +17,7 @@ from scanner import scan_networks, get_local_networks
 import mikrotik
 import edgeswitch
 import tplink_cpe
+import uptime_kuma as uk
 
 
 scheduler = AsyncIOScheduler()
@@ -176,6 +177,7 @@ class DeviceUpdate(BaseModel):
     tplink_user: Optional[str] = None
     tplink_pass: Optional[str] = None
     alias_of: Optional[int] = None
+    is_manual: Optional[bool] = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -505,6 +507,160 @@ async def get_traffic_stats(session: Session = Depends(get_session)):
             traffic[str(d.id)] = res
 
     return {"devices": traffic}
+
+
+# ── Manual devices ───────────────────────────────────────────────────────────
+
+class ManualDeviceCreate(BaseModel):
+    ip: str                          # IP or hostname/domain
+    label: Optional[str] = None
+    icon: Optional[str] = "unknown"
+    web_port: Optional[int] = None
+    web_protocol: Optional[str] = "http"
+    tags: Optional[str] = None
+
+
+@app.post("/api/devices/manual")
+def create_manual_device(body: ManualDeviceCreate, session: Session = Depends(get_session)):
+    existing = session.exec(select(Device).where(Device.ip == body.ip)).first()
+    if existing:
+        raise HTTPException(409, "Device already exists")
+    d = Device(
+        ip=body.ip,
+        label=body.label or None,
+        icon=body.icon or "unknown",
+        web_port=body.web_port,
+        web_protocol=body.web_protocol or "http",
+        tags=body.tags,
+        is_manual=True,
+        is_online=False,
+        x=100.0, y=100.0,
+    )
+    session.add(d)
+    session.commit()
+    session.refresh(d)
+    return d
+
+
+# ── Uptime Kuma ───────────────────────────────────────────────────────────────
+
+def _get_uk_settings(session: Session) -> dict:
+    keys = ["uptime_kuma_url", "uptime_kuma_user", "uptime_kuma_pass"]
+    result = {}
+    for k in keys:
+        s = session.exec(select(Settings).where(Settings.key == k)).first()
+        result[k] = s.value if s else ""
+    return result
+
+
+@app.get("/api/uptime-kuma/settings")
+def get_uk_settings(session: Session = Depends(get_session)):
+    return _get_uk_settings(session)
+
+
+class UKSettingsBody(BaseModel):
+    url: str
+    user: str
+    password: str
+
+
+@app.put("/api/uptime-kuma/settings")
+async def save_uk_settings(body: UKSettingsBody, session: Session = Depends(get_session)):
+    for key, value in [
+        ("uptime_kuma_url",  body.url),
+        ("uptime_kuma_user", body.user),
+        ("uptime_kuma_pass", body.password),
+    ]:
+        s = session.exec(select(Settings).where(Settings.key == key)).first()
+        if s:
+            s.value = value
+        else:
+            session.add(Settings(key=key, value=value))
+    session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/uptime-kuma/test")
+async def test_uk(session: Session = Depends(get_session)):
+    cfg = _get_uk_settings(session)
+    if not cfg["uptime_kuma_url"]:
+        raise HTTPException(400, "Uptime Kuma not configured")
+    ok = await uk.test_connection(cfg["uptime_kuma_url"], cfg["uptime_kuma_user"], cfg["uptime_kuma_pass"])
+    return {"ok": ok}
+
+
+@app.post("/api/devices/{device_id}/monitor")
+async def add_monitor(device_id: int, session: Session = Depends(get_session)):
+    d = session.get(Device, device_id)
+    if not d:
+        raise HTTPException(404, "Device not found")
+    cfg = _get_uk_settings(session)
+    if not cfg["uptime_kuma_url"]:
+        raise HTTPException(400, "Uptime Kuma not configured — go to Settings first")
+    name = d.label or d.hostname or d.ip
+    if d.web_port:
+        target = f"{d.web_protocol}://{d.ip}:{d.web_port}"
+        is_http = True
+    else:
+        target = d.ip
+        is_http = False
+    try:
+        mid = await uk.add_monitor(
+            cfg["uptime_kuma_url"], cfg["uptime_kuma_user"], cfg["uptime_kuma_pass"],
+            name, target, is_http,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Uptime Kuma error: {e}")
+    d.monitor_id = mid
+    session.add(d)
+    session.commit()
+    session.refresh(d)
+    return d
+
+
+@app.delete("/api/devices/{device_id}/monitor")
+async def remove_monitor(device_id: int, session: Session = Depends(get_session)):
+    d = session.get(Device, device_id)
+    if not d:
+        raise HTTPException(404, "Device not found")
+    if not d.monitor_id:
+        raise HTTPException(400, "No monitor configured for this device")
+    cfg = _get_uk_settings(session)
+    if not cfg["uptime_kuma_url"]:
+        raise HTTPException(400, "Uptime Kuma not configured")
+    try:
+        await uk.delete_monitor(
+            cfg["uptime_kuma_url"], cfg["uptime_kuma_user"], cfg["uptime_kuma_pass"],
+            d.monitor_id,
+        )
+    except Exception as e:
+        raise HTTPException(500, f"Uptime Kuma error: {e}")
+    d.monitor_id = None
+    d.alert_status = None
+    session.add(d)
+    session.commit()
+    session.refresh(d)
+    return d
+
+
+@app.post("/api/webhook")
+async def receive_webhook(payload: dict, session: Session = Depends(get_session)):
+    """Receive Uptime Kuma status change webhooks."""
+    monitor = payload.get("monitor", {})
+    heartbeat = payload.get("heartbeat", {})
+    monitor_id = monitor.get("id")
+    status = heartbeat.get("status")  # 0=down, 1=up
+
+    if monitor_id is None or status is None:
+        return {"ok": True}
+
+    d = session.exec(select(Device).where(Device.monitor_id == monitor_id)).first()
+    if d:
+        d.alert_status = "up" if status == 1 else "down"
+        session.add(d)
+        session.commit()
+
+    return {"ok": True}
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
