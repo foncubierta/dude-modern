@@ -23,12 +23,20 @@ async def add_monitor(
         try:
             api.login(user, password)
 
+            # Fetch existing notifications so we can enable them on the new monitor
+            try:
+                notifications = api.get_notifications()
+                notification_ids = {str(n["id"]): True for n in notifications}
+            except Exception:
+                notification_ids = {}
+
             # Newer UK versions require 'conditions' (NOT NULL) but the library
             # doesn't know about it. Patch _build_monitor_data to inject it.
             _original_build = api._build_monitor_data
             def _patched_build(**kwargs):
                 data = _original_build(**kwargs)
                 data.setdefault("conditions", [])
+                data["notificationIDList"] = notification_ids
                 return data
             api._build_monitor_data = _patched_build
 
