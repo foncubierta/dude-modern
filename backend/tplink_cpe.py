@@ -26,9 +26,16 @@ def _md5(password: str) -> str:
 
 
 def _ssl_ctx() -> ssl.SSLContext:
-    ctx = ssl.create_default_context()
+    """Permissive SSL context — CPE uses self-signed cert + old TLS."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
+    # Allow old TLS versions and weak ciphers used by embedded devices
+    ctx.set_ciphers("ALL:@SECLEVEL=0")
+    try:
+        ctx.minimum_version = ssl.TLSVersion.TLSv1
+    except AttributeError:
+        pass  # older Python versions
     return ctx
 
 
@@ -53,16 +60,20 @@ def _do_post(url: str, payload: dict, referer: str) -> dict:
 
 
 def _detect_scheme_sync(ip: str) -> str:
-    """Try HTTP first, then HTTPS. Return working scheme."""
-    for scheme in ("http", "https"):
+    """Detect whether device uses HTTP or HTTPS (follows redirects)."""
+    # Try HTTPS first since many CPEs redirect HTTP→HTTPS
+    for scheme in ("https", "http"):
         url = f"{scheme}://{ip}/"
         req = urllib.request.Request(url, method="GET")
         try:
             ctx = _ssl_ctx()
-            with urllib.request.urlopen(req, timeout=5, context=ctx):
+            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
+                final_url = resp.geturl()
+                if final_url.startswith("https"):
+                    return "https"
                 return scheme
         except urllib.error.HTTPError:
-            # Got an HTTP error response — server IS there
+            # Got an HTTP error — server is reachable on this scheme
             return scheme
         except Exception:
             continue
