@@ -1,9 +1,9 @@
 """
-TP-Link CPE (Pharos OS) REST client.
-Tested with CPE210, CPE510, CPE605, WBS series running Pharos OS 2.x+
+TP-Link CPE (Pharos OS 2.x) REST client.
+Tested with CPE210/CPE510 running Pharos OS 2.2.x
 
 Auth flow:
-  POST http://<ip>/  {"method":"do","login":{"username":"...","password":"<MD5_UPPER>"}}
+  POST http://<ip>/  {"method":"do","login":{"username":"...","password":"<md5_lower>"}}
   → {"stok":"<token>","error_code":0}
 
 Subsequent requests:
@@ -15,34 +15,55 @@ from typing import Optional
 
 import httpx
 
-# Per-device session cache: ip -> stok token
 _stok_cache: dict[str, str] = {}
+_base_url_cache: dict[str, str] = {}   # ip -> "http://..." or "https://..."
 
 
 def _md5(password: str) -> str:
-    return hashlib.md5(password.encode()).hexdigest().upper()
+    # Pharos OS 2.x uses lowercase MD5
+    return hashlib.md5(password.encode()).hexdigest()
 
 
-def _client(ip: str) -> httpx.AsyncClient:
-    """HttpClient configured for Pharos OS embedded web server."""
+async def _detect_base_url(ip: str) -> str:
+    """Try HTTP first, then HTTPS. Return working base URL."""
+    if ip in _base_url_cache:
+        return _base_url_cache[ip]
+    for scheme in ("http", "https"):
+        url = f"{scheme}://{ip}/"
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=5, follow_redirects=False) as c:
+                resp = await c.get(url)
+                # Any response (even 302/401) means the server is there
+                _base_url_cache[ip] = f"{scheme}://{ip}"
+                return _base_url_cache[ip]
+        except Exception:
+            continue
+    # Default fallback
+    _base_url_cache[ip] = f"http://{ip}"
+    return _base_url_cache[ip]
+
+
+def _client(ip: str, base: str) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         verify=False,
         timeout=8,
         http1=True,
         http2=False,
+        follow_redirects=True,
         headers={
             "Content-Type": "application/json",
-            "Referer": f"http://{ip}/",
-            "Origin": f"http://{ip}",
+            "Referer": f"{base}/",
+            "Origin": base,
         },
     )
 
 
 async def _login(ip: str, user: str, password: str) -> Optional[str]:
-    url = f"http://{ip}/"
+    base = await _detect_base_url(ip)
+    url = f"{base}/"
     payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
     try:
-        async with _client(ip) as client:
+        async with _client(ip, base) as client:
             resp = await client.post(url, json=payload)
             print(f"[tplink_cpe] login {ip} status={resp.status_code} body={resp.text[:300]}")
             data = resp.json()
@@ -61,9 +82,10 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
     if not stok:
         return None
 
-    url = f"http://{ip}/stok={stok}/ds"
+    base = _base_url_cache.get(ip, f"http://{ip}")
+    url = f"{base}/stok={stok}/ds"
     try:
-        async with _client(ip) as client:
+        async with _client(ip, base) as client:
             resp = await client.post(url, json=payload)
             data = resp.json()
             if data.get("error_code") == -40401:
@@ -72,7 +94,7 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
                 stok = await _login(ip, user, password)
                 if not stok:
                     return None
-                url = f"http://{ip}/stok={stok}/ds"
+                url = f"{base}/stok={stok}/ds"
                 resp = await client.post(url, json=payload)
                 data = resp.json()
             return data
@@ -83,10 +105,7 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
 
 
 async def get_stations(ip: str, user: str, password: str) -> list[dict]:
-    """
-    Return list of connected wireless clients.
-    Each entry: {"mac": "AA:BB:CC:DD:EE:FF", "signal": -70, ...}
-    """
+    """Return list of connected wireless clients."""
     data = await _post(ip, user, password, {
         "method": "get",
         "wireless": {"wlan_station_list": {"name": "station_table"}},
