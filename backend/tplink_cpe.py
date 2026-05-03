@@ -73,7 +73,7 @@ async def _get_scheme(ip: str) -> str:
     if ip not in _scheme_cache:
         scheme = await asyncio.to_thread(_detect_scheme_sync, ip)
         _scheme_cache[ip] = scheme
-        print(f"[tplink_cpe] {ip} using {scheme}")
+        print(f"[tplink_cpe] {ip} using {scheme}", flush=True)
     return _scheme_cache[ip]
 
 
@@ -99,13 +99,13 @@ async def _login(ip: str, user: str, password: str) -> Optional[str]:
 
     # Debug: show what the root page looks like
     root_body = await asyncio.to_thread(_do_get, f"{base}/")
-    print(f"[tplink_cpe] GET {ip}/ => {root_body[:300]}")
+    print(f"[tplink_cpe] GET {ip}/ => {root_body[:300]}", flush=True)
 
     for path in _LOGIN_PATHS:
         url = f"{base}{path}"
         try:
             data = await asyncio.to_thread(_do_post, url, payload, base + "/")
-            print(f"[tplink_cpe] login {ip} path={path} response: {str(data)[:300]}")
+            print(f"[tplink_cpe] login {ip} path={path} response: {str(data)[:300]}", flush=True)
             stok = data.get("stok", "")
             if stok:
                 _stok_cache[ip] = stok
@@ -113,13 +113,13 @@ async def _login(ip: str, user: str, password: str) -> Optional[str]:
                 return stok
             if data.get("error_code") not in (None, -404, 404):
                 # Got a real response (even an error) — this is the right path
-                print(f"[tplink_cpe] login {ip} path={path} error_code={data.get('error_code')}")
+                print(f"[tplink_cpe] login {ip} path={path} error_code={data.get('error_code')}", flush=True)
                 break
         except urllib.error.HTTPError as e:
-            print(f"[tplink_cpe] login {ip} path={path} HTTP {e.code}")
+            print(f"[tplink_cpe] login {ip} path={path} HTTP {e.code}", flush=True)
             continue
         except Exception as e:
-            print(f"[tplink_cpe] login {ip} path={path} error: {type(e).__name__}: {e}")
+            print(f"[tplink_cpe] login {ip} path={path} error: {type(e).__name__}: {e}", flush=True)
             continue
     return None
 
@@ -145,13 +145,14 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
             data = await asyncio.to_thread(_do_post, url, payload, base + "/")
         return data
     except Exception as e:
-        print(f"[tplink_cpe] request {ip} error: {type(e).__name__}: {e}")
+        print(f"[tplink_cpe] request {ip} error: {type(e).__name__}: {e}", flush=True)
         _stok_cache.pop(ip, None)
     return None
 
 
 async def get_stations(ip: str, user: str, password: str) -> list[dict]:
     """Return list of connected wireless clients."""
+    print(f"[tplink_cpe] get_stations called for {ip}", flush=True)
     data = await _post(ip, user, password, {
         "method": "get",
         "wireless": {"wlan_station_list": {"name": "station_table"}},
