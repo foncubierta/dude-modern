@@ -64,6 +64,8 @@ export function useDevices() {
   const updateDevice = useCallback(async (id, body) => {
     const updated = await api.devices.update(id, body);
     setDevices((prev) => prev.map((d) => (d.id === id ? updated : d)));
+    // Refresh topology in case alias_of or icon changed
+    api.topology().then(setTopology).catch(() => {});
     return updated;
   }, []);
 

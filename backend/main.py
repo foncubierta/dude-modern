@@ -288,32 +288,42 @@ async def get_topology(session: Session = Depends(get_session)):
 
     links: list[dict] = []
     for cidr, net_devs in by_network.items():
-        # Resolve any alias devices in this subnet to their primary
-        resolved_devs = []
-        for d in net_devs:
-            if d.id in aliased_ids:
-                primary_id = resolve(d.id, alias_map)
-                primary = next((x for x in devices if x.id == primary_id), None)
-                if primary and primary not in resolved_devs:
-                    resolved_devs.append(primary)
-            else:
-                if d not in resolved_devs:
-                    resolved_devs.append(d)
+        # Find the intended gateway (.1 of the subnet), resolving aliases
+        try:
+            net = ipaddress.ip_network(cidr, strict=False)
+            gw_ip = str(next(net.hosts()))
+        except Exception:
+            gw_ip = None
 
-        gw = _gateway_for_network(cidr, resolved_devs)
+        gw: Optional[Device] = None
+        if gw_ip:
+            gw = next((d for d in devices if d.ip == gw_ip), None)
+        if gw and gw.id in aliased_ids:
+            # Gateway is aliased — redirect to the primary device
+            primary_id = resolve(gw.id, alias_map)
+            gw = next((d for d in devices if d.id == primary_id), None)
+        if not gw:
+            # Fallback: router/AP/switch in subnet that isn't aliased
+            gw = next(
+                (d for d in net_devs if d.id not in aliased_ids and d.icon in ("router", "ap", "switch")),
+                None,
+            )
+        if not gw:
+            gw = next((d for d in net_devs if d.id not in aliased_ids), None)
+
         if gw:
-            for d in resolved_devs:
-                if d.id != gw.id:
+            for d in net_devs:
+                if d.id not in aliased_ids and d.id != gw.id:
                     links.append({"source": gw.id, "target": d.id})
 
-    # Deduplicate links
+    # Deduplicate
     seen_links: set[tuple] = set()
     unique_links = []
-    for l in links:
-        key = (l["source"], l["target"])
+    for lnk in links:
+        key = (lnk["source"], lnk["target"])
         if key not in seen_links:
             seen_links.add(key)
-            unique_links.append(l)
+            unique_links.append(lnk)
 
     mt_devices = [d for d in devices if d.mikrotik_user and d.mikrotik_pass]
     if mt_devices:
