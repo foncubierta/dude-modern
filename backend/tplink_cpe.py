@@ -1,11 +1,6 @@
 """
 TP-Link CPE (Pharos OS 2.x) REST client.
-Uses urllib (sync) wrapped in asyncio.to_thread — more tolerant of
-non-standard HTTP responses from embedded servers.
-
-Auth flow:
-  POST http://<ip>/  {"method":"do","login":{"username":"...","password":"<md5>"}}
-  → {"stok":"<token>","error_code":0}
+Pharos OS 2.2.x API: POST https://<ip>/ with JSON, stok-based auth.
 """
 
 import asyncio
@@ -17,66 +12,61 @@ import urllib.request
 from typing import Optional
 
 _stok_cache: dict[str, str] = {}
-_scheme_cache: dict[str, str] = {}   # ip -> "http" or "https"
+_scheme_cache: dict[str, str] = {}
 
 
 def _md5(password: str) -> str:
-    # Pharos OS 2.x uses lowercase MD5
     return hashlib.md5(password.encode()).hexdigest()
 
 
 def _ssl_ctx() -> ssl.SSLContext:
-    """Permissive SSL context — CPE uses self-signed cert + old TLS."""
+    """Permissive SSL — CPE uses self-signed cert + old TLS ciphers."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    # Allow old TLS versions and weak ciphers used by embedded devices
     ctx.set_ciphers("ALL:@SECLEVEL=0")
     try:
         ctx.minimum_version = ssl.TLSVersion.TLSv1
     except AttributeError:
-        pass  # older Python versions
+        pass
     return ctx
 
 
-def _do_post(url: str, payload: dict, referer: str) -> dict:
-    """Synchronous POST — called via asyncio.to_thread."""
-    data = _json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Referer": referer,
-            "Origin": referer.rstrip("/"),
-            "Connection": "close",
-        },
-    )
-    ctx = _ssl_ctx()
-    with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
-        body = resp.read().decode("utf-8", errors="replace")
-        return _json.loads(body)
-
-
 def _detect_scheme_sync(ip: str) -> str:
-    """Detect whether device uses HTTP or HTTPS (follows redirects)."""
-    # Try HTTPS first since many CPEs redirect HTTP→HTTPS
-    for scheme in ("https", "http"):
-        url = f"{scheme}://{ip}/"
-        req = urllib.request.Request(url, method="GET")
-        try:
-            ctx = _ssl_ctx()
-            with urllib.request.urlopen(req, timeout=5, context=ctx) as resp:
-                final_url = resp.geturl()
-                if final_url.startswith("https"):
-                    return "https"
-                return scheme
-        except urllib.error.HTTPError:
-            # Got an HTTP error — server is reachable on this scheme
-            return scheme
-        except Exception:
-            continue
+    """
+    Detect scheme by sending GET without following redirects.
+    If Location header points to https, return https.
+    """
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, hdrs, newurl):
+            return None  # block all redirects
+
+    opener = urllib.request.build_opener(
+        _NoRedirect(),
+        urllib.request.HTTPSHandler(context=_ssl_ctx()),
+    )
+    try:
+        opener.open(f"http://{ip}/", timeout=5)
+        return "http"
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location", "")
+        print(f"[tplink_cpe] redirect {ip} → {loc}", flush=True)
+        if "https" in loc:
+            return "https"
+        return "http"
+    except Exception:
+        pass
+
+    # Fall back: try HTTPS directly
+    try:
+        req = urllib.request.Request(f"https://{ip}/", method="GET")
+        with urllib.request.urlopen(req, timeout=5, context=_ssl_ctx()) as _:
+            return "https"
+    except urllib.error.HTTPError:
+        return "https"  # got HTTP response = HTTPS is up
+    except Exception:
+        pass
+
     return "http"
 
 
@@ -88,52 +78,56 @@ async def _get_scheme(ip: str) -> str:
     return _scheme_cache[ip]
 
 
-def _do_get(url: str) -> str:
-    """Synchronous GET — returns response body or error string."""
-    req = urllib.request.Request(url, method="GET", headers={"Connection": "close"})
-    ctx = _ssl_ctx()
-    try:
-        with urllib.request.urlopen(req, timeout=6, context=ctx) as resp:
-            return resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        return f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"
-    except Exception as e:
-        return f"ERROR {type(e).__name__}: {e}"
+def _do_post(url: str, payload: dict, referer: str) -> dict:
+    """Synchronous POST."""
+    data = _json.dumps(payload).encode()
+    req = urllib.request.Request(
+        url, data=data, method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Referer": referer,
+            "Origin": referer.rstrip("/"),
+            "Connection": "close",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=8, context=_ssl_ctx()) as resp:
+        return _json.loads(resp.read().decode("utf-8", errors="replace"))
 
 
-# Candidate login paths for different Pharos OS versions
-_LOGIN_PATHS = ["/", "/cgi-bin/luci/", "/cgi-bin/luci"]
+# Try all combinations: both schemes × multiple paths
+_LOGIN_CANDIDATES = [
+    ("https", "/"),
+    ("http",  "/"),
+    ("https", "/cgi-bin/luci/"),
+    ("http",  "/cgi-bin/luci/"),
+]
 
 
 async def _login(ip: str, user: str, password: str) -> Optional[str]:
-    scheme = await _get_scheme(ip)
-    base = f"{scheme}://{ip}"
     payload = {"method": "do", "login": {"username": user, "password": _md5(password)}}
 
-    # Debug: show what the root page looks like
-    root_body = await asyncio.to_thread(_do_get, f"{base}/")
-    print(f"[tplink_cpe] GET {ip}/ => {root_body[:300]}", flush=True)
-
-    for path in _LOGIN_PATHS:
+    for scheme, path in _LOGIN_CANDIDATES:
+        base = f"{scheme}://{ip}"
         url = f"{base}{path}"
         try:
             data = await asyncio.to_thread(_do_post, url, payload, base + "/")
-            print(f"[tplink_cpe] login {ip} path={path} response: {str(data)[:300]}", flush=True)
+            print(f"[tplink_cpe] login {ip} {scheme}{path} → {str(data)[:200]}", flush=True)
             stok = data.get("stok", "")
             if stok:
                 _stok_cache[ip] = stok
-                _stok_cache[f"{ip}__path"] = path  # remember working path
+                _stok_cache[f"{ip}__base"] = base
+                _stok_cache[f"{ip}__path"] = path
                 return stok
-            if data.get("error_code") not in (None, -404, 404):
-                # Got a real response (even an error) — this is the right path
-                print(f"[tplink_cpe] login {ip} path={path} error_code={data.get('error_code')}", flush=True)
-                break
+            err = data.get("error_code")
+            if err is not None and err not in (-404, 404):
+                # Real response on this path — credentials wrong or other error
+                print(f"[tplink_cpe] login {ip} error_code={err}", flush=True)
+                return None  # No point trying other paths
         except urllib.error.HTTPError as e:
-            print(f"[tplink_cpe] login {ip} path={path} HTTP {e.code}", flush=True)
-            continue
+            print(f"[tplink_cpe] login {ip} {scheme}{path} HTTP {e.code}", flush=True)
         except Exception as e:
-            print(f"[tplink_cpe] login {ip} path={path} error: {type(e).__name__}: {e}", flush=True)
-            continue
+            print(f"[tplink_cpe] login {ip} {scheme}{path} {type(e).__name__}: {e}", flush=True)
+
     return None
 
 
@@ -142,23 +136,21 @@ async def _post(ip: str, user: str, password: str, payload: dict) -> Optional[di
     if not stok:
         return None
 
-    scheme = _scheme_cache.get(ip, "http")
-    base = f"{scheme}://{ip}"
-    login_path = _stok_cache.get(f"{ip}__path", "/")
-    url = f"{base}{login_path}stok={stok}/ds"
+    base = _stok_cache.get(f"{ip}__base", f"http://{ip}")
+    path = _stok_cache.get(f"{ip}__path", "/")
+    url = f"{base}{path}stok={stok}/ds"
     try:
         data = await asyncio.to_thread(_do_post, url, payload, base + "/")
         if data.get("error_code") == -40401:
-            # Token expired — re-login once
             _stok_cache.pop(ip, None)
             stok = await _login(ip, user, password)
             if not stok:
                 return None
-            url = f"{base}{login_path}stok={stok}/ds"
+            url = f"{base}{path}stok={stok}/ds"
             data = await asyncio.to_thread(_do_post, url, payload, base + "/")
         return data
     except Exception as e:
-        print(f"[tplink_cpe] request {ip} error: {type(e).__name__}: {e}", flush=True)
+        print(f"[tplink_cpe] request {ip} {type(e).__name__}: {e}", flush=True)
         _stok_cache.pop(ip, None)
     return None
 
