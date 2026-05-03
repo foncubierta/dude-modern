@@ -22,6 +22,9 @@ export function DeviceCard({ device, onEdit, onDelete }) {
 
       <div className={styles.body}>
         <div className={styles.name} title={displayName}>{displayName}</div>
+        {device.hostname && device.hostname !== displayName && (
+          <div className={styles.hostname}>{device.hostname}</div>
+        )}
         <div className={styles.ip}>{device.ip}</div>
         {device.vendor && <div className={styles.vendor}>{device.vendor}</div>}
         {device.mac && <div className={styles.mac}>{device.mac}</div>}

@@ -23,6 +23,9 @@ export const DeviceNode = memo(({ data }) => {
 
       <div className={styles.info}>
         <div className={styles.name} title={displayName}>{displayName}</div>
+        {device.hostname && device.hostname !== displayName && (
+          <div className={styles.hostname}>{device.hostname}</div>
+        )}
         <div className={styles.ip}>{device.ip}</div>
         {device.vendor && <div className={styles.vendor}>{device.vendor}</div>}
         {device.network && <div className={styles.network}>{device.network}</div>}
