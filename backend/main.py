@@ -410,6 +410,9 @@ async def get_topology(session: Session = Depends(get_session)):
                 mac = entry.get("mac-address", "").upper()
                 target = mac_to_device.get(mac)
                 if target and target.id != mt_dev.id and target.id not in aliased_ids:
+                    # Only refine devices in the same subnet — don't steal devices from other gateways
+                    if target.network and mt_dev.network and target.network != mt_dev.network:
+                        continue
                     unique_links = [l for l in unique_links if l["target"] != target.id]
                     unique_links.append({"source": mt_dev.id, "target": target.id})
 
@@ -427,6 +430,9 @@ async def get_topology(session: Session = Depends(get_session)):
                 mac = entry.get("mac_address", "").upper()
                 target = mac_to_device.get(mac)
                 if target and target.id != es_dev.id and target.id not in aliased_ids:
+                    # Only refine devices in the same subnet — don't steal devices from other gateways
+                    if target.network and es_dev.network and target.network != es_dev.network:
+                        continue
                     unique_links = [l for l in unique_links if l["target"] != target.id]
                     unique_links.append({"source": es_dev.id, "target": target.id})
 
