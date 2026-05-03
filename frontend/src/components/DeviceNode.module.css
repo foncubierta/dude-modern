@@ -9,6 +9,7 @@
   align-items: center;
   gap: 8px;
   cursor: grab;
+  position: relative;
   transition: border-color 0.15s, box-shadow 0.15s;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
 }
@@ -20,6 +21,35 @@
 
 .online { border-top: 3px solid var(--success); }
 .offline { border-top: 3px solid var(--text-muted); opacity: 0.7; }
+
+.isNew {
+  border-color: #f0a500;
+  box-shadow: 0 0 0 1px rgba(240,165,0,0.3), 0 0 12px rgba(240,165,0,0.2);
+}
+.isNew:hover {
+  border-color: #f0a500;
+  box-shadow: 0 0 0 2px rgba(240,165,0,0.4), 0 8px 24px rgba(0,0,0,0.4);
+}
+
+.newBadge {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  background: #f0a500;
+  color: #000;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+@keyframes badgePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
 
 .iconWrap {
   width: 48px; height: 48px;

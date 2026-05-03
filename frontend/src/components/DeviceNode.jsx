@@ -4,6 +4,8 @@ import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { DeviceIcon } from "./DeviceIcon";
 import styles from "./DeviceNode.module.css";
 
+const NEW_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
+
 export const DeviceNode = memo(({ data }) => {
   const { device, traffic, onEdit, onDelete } = data;
   const displayName = device.label || device.hostname || device.ip;
@@ -11,11 +13,14 @@ export const DeviceNode = memo(({ data }) => {
     ? `${device.web_protocol}://${device.ip}:${device.web_port}`
     : null;
   const hasTraffic = traffic && (traffic.rx_mbps > 0 || traffic.tx_mbps > 0);
+  const isNew = device.first_seen &&
+    (Date.now() - new Date(device.first_seen + "Z").getTime()) < NEW_THRESHOLD_MS;
 
   return (
-    <div className={`${styles.node} ${device.is_online ? styles.online : styles.offline}`}>
+    <div className={`${styles.node} ${device.is_online ? styles.online : styles.offline} ${isNew ? styles.isNew : ""}`}>
       <Handle type="target" position={Position.Top} className={styles.handle} />
 
+      {isNew && <span className={styles.newBadge}>NEW</span>}
       <div className={`${styles.iconWrap} ${device.is_online ? styles.iconOnline : styles.iconOffline}`}>
         <DeviceIcon type={device.icon || "unknown"} size={24} />
         <span className={`${styles.dot} ${device.is_online ? styles.dotOnline : styles.dotOffline}`} />
