@@ -29,13 +29,15 @@ async def _login(ip: str, user: str, password: str) -> Optional[str]:
     try:
         async with httpx.AsyncClient(verify=False, timeout=6) as client:
             resp = await client.post(url, json=payload)
+            print(f"[tplink_cpe] login {ip} status={resp.status_code} body={resp.text[:200]}")
             data = resp.json()
             stok = data.get("stok", "")
             if stok:
                 _stok_cache[ip] = stok
                 return stok
+            print(f"[tplink_cpe] login {ip} no stok in response: {data}")
     except Exception as e:
-        print(f"[tplink_cpe] login {ip} error: {e}")
+        print(f"[tplink_cpe] login {ip} error: {type(e).__name__}: {e}")
     return None
 
 
