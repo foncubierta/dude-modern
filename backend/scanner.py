@@ -191,6 +191,7 @@ async def scan_networks(networks: list[str], scan_id: int):
                 existing.is_online = True
                 existing.last_seen = datetime.utcnow()
                 existing.network = h["network"]
+                existing.ip = ip  # update IP in case it changed (DHCP)
                 if h["hostname"] and not existing.hostname:
                     existing.hostname = h["hostname"]
                 if h["mac"] and not existing.mac:
