@@ -1,7 +1,7 @@
 import {
   Router, Server, Monitor, Smartphone, Cctv,
   Wifi, HelpCircle, Printer, Tv, Radio,
-  Plug, AirVent, Sun, Cpu, PhoneCall,
+  Plug, AirVent, Sun, Cpu, PhoneCall, Speaker,
 } from "lucide-react";
 
 const ICONS = {
@@ -19,6 +19,7 @@ const ICONS = {
   solar:   Sun,
   iot:     Cpu,
   voip:    PhoneCall,
+  speaker: Speaker,
   unknown: HelpCircle,
 };
 
