@@ -20,8 +20,9 @@
   border-radius: var(--radius-lg);
   padding: 5px 8px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-  flex-wrap: wrap;
-  max-width: 90vw;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  max-width: 92vw;
 }
 
 .filterLabel {
