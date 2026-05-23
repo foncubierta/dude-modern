@@ -22,7 +22,17 @@ Think **The Dude / PRTG — but self-hosted, modern, and running in Docker**.
 
 ## Screenshots
 
-> Topology map with live device status, traffic, and online/offline indicators.
+**Topology map** — interactive canvas with live device status, traffic labels and online/offline indicators:
+
+![Topology map](docs/screenshots/map.png)
+
+**Devices view** — searchable card grid with MAC, vendor, subnet and offline duration:
+
+![Devices view](docs/screenshots/devices.png)
+
+**Network Subnets** — manage which subnets are scanned, with auto-detected networks shown for quick add:
+
+![Subnets modal](docs/screenshots/subnets.png)
 
 ---
 
