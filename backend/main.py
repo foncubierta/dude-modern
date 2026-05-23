@@ -165,11 +165,51 @@ async def scheduled_scan():
     await enrich_hostnames_from_discovery()
 
 
+STALE_SOFT_DAYS = 30   # offline this long → hide from map
+STALE_HARD_DAYS = 90   # offline this long → delete from DB
+
+
+async def cleanup_stale_devices():
+    """
+    Daily job:
+      - Soft-delete devices not seen for STALE_SOFT_DAYS days.
+      - Hard-delete devices not seen for STALE_HARD_DAYS days.
+    Skips: manual devices (user-added), devices linked to a UK monitor.
+    """
+    from sqlmodel import Session as S
+    now = datetime.utcnow()
+
+    with S(engine) as session:
+        devices = session.exec(select(Device)).all()
+        soft_n = hard_n = 0
+
+        for d in devices:
+            # Never auto-clean manually added entries or monitored devices
+            if d.is_manual or d.monitor_id:
+                continue
+            if not d.last_seen:
+                continue
+
+            days_gone = (now - d.last_seen).days
+
+            if days_gone >= STALE_HARD_DAYS:
+                session.delete(d)
+                hard_n += 1
+            elif days_gone >= STALE_SOFT_DAYS and not d.is_deleted and not d.is_online:
+                d.is_deleted = True
+                soft_n += 1
+
+        if soft_n or hard_n:
+            session.commit()
+            print(f"[cleanup] soft-deleted {soft_n}, hard-deleted {hard_n} stale devices")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_db()
     _seed_default_settings()
-    scheduler.add_job(scheduled_scan, "interval", minutes=5, id="auto_scan")
+    scheduler.add_job(scheduled_scan,       "interval", minutes=5, id="auto_scan")
+    scheduler.add_job(cleanup_stale_devices, "interval", hours=24,  id="stale_cleanup")
     scheduler.start()
     yield
     scheduler.shutdown()

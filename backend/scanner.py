@@ -191,7 +191,16 @@ async def scan_networks(networks: list[str], scan_id: int):
                 existing.is_online = True
                 existing.last_seen = datetime.utcnow()
                 existing.network = h["network"]
-                existing.ip = ip  # update IP in case it changed (DHCP)
+
+                # If the IP changed (DHCP rotation), update it and remove any
+                # orphan record that might already exist at the new IP address.
+                if existing.ip != ip:
+                    ghost = session.exec(
+                        select(Device).where(Device.ip == ip, Device.id != existing.id)
+                    ).first()
+                    if ghost and not ghost.label and not ghost.monitor_id:
+                        session.delete(ghost)
+                    existing.ip = ip
                 if h["hostname"] and not existing.hostname:
                     existing.hostname = h["hostname"]
                 if h["mac"] and not existing.mac:
