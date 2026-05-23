@@ -35,6 +35,49 @@ def get_configured_networks(session: Session) -> list[str]:
     return get_local_networks()
 
 
+async def enrich_macs_from_mikrotik():
+    """Query MikroTik ARP tables and fill in missing MACs on devices."""
+    from sqlmodel import Session as S
+    with S(engine) as session:
+        mt_devices = session.exec(
+            select(Device).where(Device.mikrotik_user.isnot(None))
+        ).all()
+        if not mt_devices:
+            return
+
+        arp_results = await asyncio.gather(
+            *[mikrotik.get_arp_table(d.ip, d.mikrotik_user, d.mikrotik_pass) for d in mt_devices],
+            return_exceptions=True,
+        )
+
+        # Build IP → MAC map from all MikroTik routers
+        ip_to_mac: dict[str, str] = {}
+        for arp in arp_results:
+            if isinstance(arp, Exception) or not arp:
+                continue
+            for entry in arp:
+                mac = entry.get("mac-address", "").upper().strip()
+                ip  = entry.get("address", "").strip()
+                if mac and ip:
+                    ip_to_mac[ip] = mac
+
+        if not ip_to_mac:
+            return
+
+        updated = False
+        for device in session.exec(select(Device)).all():
+            if device.mac:
+                continue  # already has a MAC
+            mac = ip_to_mac.get(device.ip)
+            if mac:
+                device.mac = mac
+                updated = True
+
+        if updated:
+            session.commit()
+            print(f"[enrich_macs] filled MAC addresses from MikroTik ARP table")
+
+
 async def enrich_hostnames_from_mikrotik():
     """Query MikroTik DHCP leases and update device hostnames with active-hostname."""
     from sqlmodel import Session as S
@@ -161,6 +204,7 @@ async def scheduled_scan():
 
     async with scan_lock:
         await scan_networks(networks, scan_id)
+    await enrich_macs_from_mikrotik()
     await enrich_hostnames_from_mikrotik()
     await enrich_hostnames_from_discovery()
 
@@ -209,6 +253,7 @@ async def lifespan(app: FastAPI):
     create_db()
     _seed_default_settings()
     _backfill_offline_since()
+    asyncio.get_event_loop().create_task(enrich_macs_from_mikrotik())
     scheduler.add_job(scheduled_scan,       "interval", minutes=5, id="auto_scan")
     scheduler.add_job(cleanup_stale_devices, "interval", hours=24,  id="stale_cleanup")
     scheduler.start()
@@ -351,6 +396,7 @@ async def trigger_scan(background_tasks: BackgroundTasks, session: Session = Dep
     async def _run():
         async with scan_lock:
             await scan_networks(networks, scan_id)
+        await enrich_macs_from_mikrotik()
         await enrich_hostnames_from_mikrotik()
         await enrich_hostnames_from_discovery()
 
