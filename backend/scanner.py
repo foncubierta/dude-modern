@@ -166,9 +166,12 @@ async def scan_networks(networks: list[str], scan_id: int):
 
     with Session(engine) as session:
         # Marcar todos como offline; los encontrados se marcarán online
+        now = datetime.utcnow()
         for device in session.exec(select(Device)).all():
             # Solo marcar offline los de las redes escaneadas
             if device.network in networks or device.network is None:
+                if device.is_online:  # was online → just went offline
+                    device.offline_since = now
                 device.is_online = False
 
         for h in all_hosts:
@@ -189,6 +192,7 @@ async def scan_networks(networks: list[str], scan_id: int):
 
             if existing:
                 existing.is_online = True
+                existing.offline_since = None   # back online — clear the timer
                 existing.last_seen = datetime.utcnow()
                 existing.network = h["network"]
 

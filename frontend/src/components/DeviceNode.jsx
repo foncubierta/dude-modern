@@ -6,6 +6,19 @@ import styles from "./DeviceNode.module.css";
 
 const NEW_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
 
+function formatOffline(iso) {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso + "Z").getTime();
+  const m = Math.floor(ms / 60000);
+  if (m < 1)   return "just now";
+  if (m < 60)  return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 30)  return `${d}d`;
+  return `${Math.floor(d / 30)}mo`;
+}
+
 export const DeviceNode = memo(({ data }) => {
   const { device, traffic, onEdit, onDelete } = data;
   const displayName = device.label || device.hostname || device.ip;
@@ -16,6 +29,7 @@ export const DeviceNode = memo(({ data }) => {
   const isNew  = device.first_seen &&
     (Date.now() - new Date(device.first_seen + "Z").getTime()) < NEW_THRESHOLD_MS;
   const isDown = device.alert_status === "down";
+  const offlineFor = !device.is_online ? formatOffline(device.offline_since) : null;
 
   return (
     <div className={[
@@ -40,6 +54,9 @@ export const DeviceNode = memo(({ data }) => {
           <div className={styles.hostname}>{device.hostname}</div>
         )}
         <div className={styles.ip}>{device.ip}</div>
+        {offlineFor && (
+          <div className={styles.offlineSince}>offline {offlineFor}</div>
+        )}
         {device.vendor && <div className={styles.vendor}>{device.vendor}</div>}
         {device.network && <div className={styles.network}>{device.network}</div>}
         {hasTraffic && (

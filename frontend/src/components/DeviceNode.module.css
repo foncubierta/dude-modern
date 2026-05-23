@@ -103,6 +103,13 @@
   font-size: 11px; color: #00b4d8; margin-top: 2px;
 }
 .hostname { font-size: 10px; color: #8b949e; margin-top: 1px; font-style: italic; }
+.offlineSince {
+  font-size: 9px; margin-top: 3px;
+  color: #f85149;
+  background: rgba(248,81,73,0.1);
+  border-radius: 3px; padding: 1px 5px;
+  display: inline-block;
+}
 .vendor { font-size: 10px; color: #8b949e; margin-top: 1px; }
 .network {
   font-family: monospace; font-size: 9px;

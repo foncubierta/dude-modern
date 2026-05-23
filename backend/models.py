@@ -31,6 +31,7 @@ class Device(SQLModel, table=True):
     is_manual: bool = Field(default=False)
     monitor_id: Optional[int] = None
     alert_status: Optional[str] = None  # "up", "down", or None
+    offline_since: Optional[datetime] = None
 
 
 class ScanLog(SQLModel, table=True):
