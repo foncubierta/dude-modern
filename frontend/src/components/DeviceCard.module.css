@@ -39,6 +39,7 @@
 .dot { width: 6px; height: 6px; border-radius: 50%; }
 .dotOnline { background: var(--success); box-shadow: 0 0 6px var(--success); }
 .dotOffline { background: var(--text-muted); }
+.offlineDuration { color: #f85149; font-weight: 600; }
 
 .body { display: flex; flex-direction: column; gap: 3px; }
 

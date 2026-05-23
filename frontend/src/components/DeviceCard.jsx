@@ -2,11 +2,25 @@ import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { DeviceIcon } from "./DeviceIcon";
 import styles from "./DeviceCard.module.css";
 
+function formatOffline(iso) {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso + "Z").getTime();
+  const m = Math.floor(ms / 60000);
+  if (m < 1)  return "just now";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d`;
+  return `${Math.floor(d / 30)}mo`;
+}
+
 export function DeviceCard({ device, onEdit, onDelete }) {
   const displayName = device.label || device.hostname || device.ip;
   const webUrl = device.web_port
     ? `${device.web_protocol}://${device.ip}:${device.web_port}`
     : null;
+  const offlineFor = !device.is_online ? formatOffline(device.offline_since) : null;
 
   return (
     <div className={`${styles.card} ${device.is_online ? styles.online : styles.offline}`}>
@@ -16,7 +30,11 @@ export function DeviceCard({ device, onEdit, onDelete }) {
         </div>
         <div className={styles.status}>
           <span className={`${styles.dot} ${device.is_online ? styles.dotOnline : styles.dotOffline}`} />
-          {device.is_online ? "Online" : "Offline"}
+          {device.is_online ? "Online" : (
+            <span>
+              Offline{offlineFor && <span className={styles.offlineDuration}> · {offlineFor}</span>}
+            </span>
+          )}
         </div>
       </div>
 
