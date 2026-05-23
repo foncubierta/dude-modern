@@ -18,6 +18,7 @@ import mikrotik
 import edgeswitch
 import tplink_cpe
 import uptime_kuma as uk
+import discovery
 
 
 scheduler = AsyncIOScheduler()
@@ -88,6 +89,63 @@ async def enrich_hostnames_from_mikrotik():
             session.commit()
 
 
+async def enrich_hostnames_from_discovery():
+    """
+    Run mDNS, SSDP and NetBIOS discovery in parallel and update device
+    hostnames/icons. Only fills in missing hostnames — never overwrites
+    a user label or an already-set hostname.
+    """
+    from sqlmodel import Session as S
+
+    with S(engine) as session:
+        devices = session.exec(select(Device).where(Device.is_deleted == False)).all()
+        ips = [d.ip for d in devices]
+
+    if not ips:
+        return
+
+    mdns_result, ssdp_names, netbios_names = await asyncio.gather(
+        discovery.discover_mdns(timeout=6.0),
+        discovery.discover_ssdp(timeout=4.0),
+        discovery.discover_netbios(ips, timeout=0.8),
+        return_exceptions=True,
+    )
+
+    # Unpack mDNS tuple (names, icon_hints)
+    mdns_names: dict[str, str] = {}
+    mdns_icons: dict[str, str] = {}
+    if isinstance(mdns_result, tuple):
+        mdns_names, mdns_icons = mdns_result
+
+    if isinstance(ssdp_names, Exception):   ssdp_names   = {}
+    if isinstance(netbios_names, Exception): netbios_names = {}
+
+    # Merge: NetBIOS < SSDP < mDNS (highest priority last, overwrites lower)
+    merged_names: dict[str, str] = {}
+    for source in (netbios_names, ssdp_names, mdns_names):
+        if isinstance(source, dict):
+            merged_names.update(source)
+
+    if not merged_names and not mdns_icons:
+        return
+
+    with S(engine) as session:
+        updated = False
+        for device in session.exec(select(Device)).all():
+            # Only fill in hostname if currently empty
+            name = merged_names.get(device.ip)
+            if name and not device.hostname:
+                device.hostname = name
+                updated = True
+            # Auto-set icon if still unknown and mDNS gave a hint
+            icon_hint = mdns_icons.get(device.ip)
+            if icon_hint and device.icon in (None, "unknown"):
+                device.icon = icon_hint
+                updated = True
+        if updated:
+            session.commit()
+
+
 async def scheduled_scan():
     if scan_lock.locked():
         return
@@ -104,6 +162,7 @@ async def scheduled_scan():
     async with scan_lock:
         await scan_networks(networks, scan_id)
     await enrich_hostnames_from_mikrotik()
+    await enrich_hostnames_from_discovery()
 
 
 @asynccontextmanager
@@ -234,6 +293,7 @@ async def trigger_scan(background_tasks: BackgroundTasks, session: Session = Dep
         async with scan_lock:
             await scan_networks(networks, scan_id)
         await enrich_hostnames_from_mikrotik()
+        await enrich_hostnames_from_discovery()
 
     background_tasks.add_task(_run)
     return {"scan_id": scan_id, "networks": networks, "status": "started"}
