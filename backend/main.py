@@ -208,11 +208,30 @@ async def cleanup_stale_devices():
 async def lifespan(app: FastAPI):
     create_db()
     _seed_default_settings()
+    _backfill_offline_since()
     scheduler.add_job(scheduled_scan,       "interval", minutes=5, id="auto_scan")
     scheduler.add_job(cleanup_stale_devices, "interval", hours=24,  id="stale_cleanup")
     scheduler.start()
     yield
     scheduler.shutdown()
+
+
+def _backfill_offline_since():
+    """One-time backfill: set offline_since = last_seen for devices already offline."""
+    from sqlmodel import Session as S
+    with S(engine) as session:
+        devices = session.exec(
+            select(Device).where(
+                Device.is_online == False,
+                Device.offline_since == None,
+                Device.last_seen != None,
+            )
+        ).all()
+        for d in devices:
+            d.offline_since = d.last_seen
+        if devices:
+            session.commit()
+            print(f"[backfill] set offline_since on {len(devices)} existing offline devices")
 
 
 def _seed_default_settings():
