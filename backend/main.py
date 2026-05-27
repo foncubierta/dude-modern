@@ -36,8 +36,14 @@ def get_configured_networks(session: Session) -> list[str]:
 
 
 async def enrich_macs_from_mikrotik():
-    """Query MikroTik ARP tables and fill in missing MACs on devices."""
+    """Query MikroTik ARP tables and fill in missing MACs on devices.
+    Also deduplicates stale records that arise when a DHCP device changes
+    IP: nmap creates a new record for the new IP while the old one stays
+    offline. Once both share the same MAC we can safely merge them.
+    """
+    from collections import defaultdict
     from sqlmodel import Session as S
+
     with S(engine) as session:
         mt_devices = session.exec(
             select(Device).where(Device.mikrotik_user.isnot(None))
@@ -64,10 +70,11 @@ async def enrich_macs_from_mikrotik():
         if not ip_to_mac:
             return
 
+        # ── Pass 1: fill missing MACs ─────────────────────────────────────
         updated = False
-        for device in session.exec(select(Device)).all():
+        for device in session.exec(select(Device).where(Device.is_deleted == False)).all():
             if device.mac:
-                continue  # already has a MAC
+                continue
             mac = ip_to_mac.get(device.ip)
             if mac:
                 device.mac = mac
@@ -75,7 +82,58 @@ async def enrich_macs_from_mikrotik():
 
         if updated:
             session.commit()
-            print(f"[enrich_macs] filled MAC addresses from MikroTik ARP table")
+            print("[enrich_macs] filled MAC addresses from MikroTik ARP table")
+
+        # ── Pass 2: deduplicate same-MAC records ──────────────────────────
+        # After filling MACs we may have two records for the same physical
+        # device: one online (new IP) and one offline (old IP). Merge them.
+        all_devices = session.exec(select(Device).where(Device.is_deleted == False)).all()
+
+        mac_groups: dict[str, list] = defaultdict(list)
+        for d in all_devices:
+            if d.mac:
+                mac_groups[d.mac.upper()].append(d)
+
+        dedup_n = 0
+        for mac, group in mac_groups.items():
+            if len(group) < 2:
+                continue
+
+            online  = [d for d in group if d.is_online]
+            offline = [d for d in group if not d.is_online]
+
+            # Only act when exactly one is online; the offline ones are stale
+            if len(online) != 1:
+                continue
+
+            primary = online[0]
+            for stale in offline:
+                # Never auto-delete if the user put effort into the record
+                if stale.label or stale.monitor_id or stale.mikrotik_user or stale.edgeswitch_user:
+                    # Transfer the label to the current IP record instead
+                    if stale.label and not primary.label:
+                        primary.label = stale.label
+                    stale.is_deleted = True
+                else:
+                    stale.is_deleted = True
+
+                # Promote useful fields to the primary if it lacks them
+                if not primary.hostname and stale.hostname:
+                    primary.hostname = stale.hostname
+                if not primary.vendor and stale.vendor:
+                    primary.vendor = stale.vendor
+                if not primary.web_port and stale.web_port:
+                    primary.web_port = stale.web_port
+                    primary.web_protocol = stale.web_protocol
+                if not primary.icon or primary.icon == "unknown":
+                    if stale.icon and stale.icon != "unknown":
+                        primary.icon = stale.icon
+
+                dedup_n += 1
+                print(f"[enrich_macs] dedup: merged stale {stale.ip} → {primary.ip} (MAC {mac})")
+
+        if dedup_n:
+            session.commit()
 
 
 async def enrich_hostnames_from_mikrotik():
