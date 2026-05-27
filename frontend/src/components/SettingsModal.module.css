@@ -75,6 +75,20 @@
 
 .row { display: flex; gap: 10px; }
 
+.inputUnit {
+  display: flex; align-items: center; gap: 8px;
+}
+.inputUnit input {
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 7px 10px;
+  color: var(--text-primary); font-size: 13px;
+  width: 80px;
+}
+.inputUnit input:focus { outline: none; border-color: var(--accent); }
+.inputUnit span { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+.fieldHint { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
 .testRow { display: flex; align-items: center; gap: 10px; }
 .testBtn {
   display: flex; align-items: center; gap: 6px;

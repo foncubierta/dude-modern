@@ -5,26 +5,39 @@ import styles from "./SettingsModal.module.css";
 
 export function SettingsModal({ onClose }) {
   const [form, setForm] = useState({ url: "", user: "", password: "" });
+  const [cleanup, setCleanup] = useState({ soft: "30", hard: "90" });
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null); // null | "ok" | "fail"
 
   useEffect(() => {
-    api.uptimeKuma.getSettings().then((s) => {
+    Promise.all([
+      api.uptimeKuma.getSettings(),
+      api.settings.get(),
+    ]).then(([uk, all]) => {
       setForm({
-        url:      s.uptime_kuma_url  || "",
-        user:     s.uptime_kuma_user || "",
-        password: s.uptime_kuma_pass || "",
+        url:      uk.uptime_kuma_url  || "",
+        user:     uk.uptime_kuma_user || "",
+        password: uk.uptime_kuma_pass || "",
+      });
+      setCleanup({
+        soft: all.stale_soft_days ?? "30",
+        hard: all.stale_hard_days ?? "90",
       });
     }).catch(() => {});
   }, []);
 
   function set(key, val) { setForm((f) => ({ ...f, [key]: val })); }
+  function setC(key, val) { setCleanup((f) => ({ ...f, [key]: val })); }
 
   async function handleSave() {
     setSaving(true);
     try {
-      await api.uptimeKuma.saveSettings(form);
+      await Promise.all([
+        api.uptimeKuma.saveSettings(form),
+        api.settings.set("stale_soft_days", String(parseInt(cleanup.soft) || 30)),
+        api.settings.set("stale_hard_days", String(parseInt(cleanup.hard) || 90)),
+      ]);
       onClose();
     } finally {
       setSaving(false);
@@ -106,6 +119,38 @@ export function SettingsModal({ onClose }) {
             </button>
             {testResult === "ok"   && <span className={styles.ok}><CheckCircle size={14}/> Connected</span>}
             {testResult === "fail" && <span className={styles.fail}><XCircle size={14}/> Failed</span>}
+          </div>
+
+          <h3 className={styles.sectionTitle}>Device Cleanup</h3>
+          <p className={styles.hint}>
+            Devices that have been offline for a long time are removed automatically.
+            Set to <strong>0</strong> to disable a threshold.
+          </p>
+          <div className={styles.row}>
+            <div className={styles.field}>
+              <label>Hide after (days offline)</label>
+              <div className={styles.inputUnit}>
+                <input
+                  type="number" min="0" max="365"
+                  value={cleanup.soft}
+                  onChange={(e) => setC("soft", e.target.value)}
+                />
+                <span>days</span>
+              </div>
+              <span className={styles.fieldHint}>Moved to trash, restorable</span>
+            </div>
+            <div className={styles.field}>
+              <label>Delete after (days offline)</label>
+              <div className={styles.inputUnit}>
+                <input
+                  type="number" min="0" max="3650"
+                  value={cleanup.hard}
+                  onChange={(e) => setC("hard", e.target.value)}
+                />
+                <span>days</span>
+              </div>
+              <span className={styles.fieldHint}>Permanently deleted</span>
+            </div>
           </div>
 
           <h3 className={styles.sectionTitle}>Webhook (Option B)</h3>

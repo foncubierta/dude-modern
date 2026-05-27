@@ -267,21 +267,29 @@ async def scheduled_scan():
     await enrich_hostnames_from_discovery()
 
 
-STALE_SOFT_DAYS = 30   # offline this long → hide from map
-STALE_HARD_DAYS = 90   # offline this long → delete from DB
-
-
 async def cleanup_stale_devices():
     """
     Daily job:
-      - Soft-delete devices not seen for STALE_SOFT_DAYS days.
-      - Hard-delete devices not seen for STALE_HARD_DAYS days.
+      - Soft-delete devices offline for stale_soft_days (default 30).
+      - Hard-delete devices offline for stale_hard_days (default 90).
     Skips: manual devices (user-added), devices linked to a UK monitor.
+    Thresholds are read from the Settings table so they can be changed
+    from the UI without restarting the backend.
     """
     from sqlmodel import Session as S
     now = datetime.utcnow()
 
     with S(engine) as session:
+        def _int_setting(key: str, default: int) -> int:
+            row = session.exec(select(Settings).where(Settings.key == key)).first()
+            try:
+                return int(row.value) if row else default
+            except (ValueError, TypeError):
+                return default
+
+        soft_days = _int_setting("stale_soft_days", 30)
+        hard_days = _int_setting("stale_hard_days", 90)
+
         devices = session.exec(select(Device)).all()
         soft_n = hard_n = 0
 
@@ -294,10 +302,10 @@ async def cleanup_stale_devices():
 
             days_gone = (now - d.last_seen).days
 
-            if days_gone >= STALE_HARD_DAYS:
+            if days_gone >= hard_days:
                 session.delete(d)
                 hard_n += 1
-            elif days_gone >= STALE_SOFT_DAYS and not d.is_deleted and not d.is_online:
+            elif days_gone >= soft_days and not d.is_deleted and not d.is_online:
                 d.is_deleted = True
                 soft_n += 1
 
@@ -342,9 +350,11 @@ def _seed_default_settings():
     detected = get_local_networks()
     with S(engine) as session:
         for key, value in [
-            ("scan_networks", json.dumps(detected)),
-            ("scan_interval", "5"),
-            ("auto_scan", "true"),
+            ("scan_networks",   json.dumps(detected)),
+            ("scan_interval",   "5"),
+            ("auto_scan",       "true"),
+            ("stale_soft_days", "30"),
+            ("stale_hard_days", "90"),
         ]:
             exists = session.exec(select(Settings).where(Settings.key == key)).first()
             if not exists:
