@@ -85,7 +85,7 @@ def run_nmap_scan(network: str) -> list[dict]:
     """Ejecuta nmap en una subred y retorna lista de hosts encontrados."""
     nm = nmap.PortScanner()
     try:
-        nm.scan(hosts=network, arguments="-sn --host-timeout 10s --max-retries 3 --min-rate 100")
+        nm.scan(hosts=network, arguments="-sn -PE -PS22,80,443,8080,8443,8888 --host-timeout 15s --max-retries 2")
     except Exception as e:
         print(f"nmap error on {network}: {e}")
         return []
@@ -133,6 +133,48 @@ async def scan_single_network(network: str) -> list[dict]:
     return hosts
 
 
+async def _tcp_reachable(ip: str, port: int, timeout: float = 1.0) -> bool:
+    """Returns True if a TCP connection to ip:port succeeds."""
+    try:
+        _, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port), timeout=timeout
+        )
+        writer.close()
+        return True
+    except Exception:
+        return False
+
+
+async def verify_offline_devices(missed_ips: set[str], session) -> set[str]:
+    """
+    For IPs that nmap did NOT find, attempt a direct TCP connect to any
+    known open port (web_port, 80, 22). Returns the subset that ARE reachable.
+    Catches devices that block ICMP but have a web/ssh port open.
+    """
+    from sqlmodel import select as sel
+    FALLBACK_PORTS = [80, 22, 443, 8080, 8443]
+
+    candidates = session.exec(
+        sel(Device).where(Device.ip.in_(missed_ips), Device.is_deleted == False)
+    ).all()
+
+    if not candidates:
+        return set()
+
+    async def check_device(device):
+        ports = []
+        if device.web_port:
+            ports.append(device.web_port)
+        ports += [p for p in FALLBACK_PORTS if p not in ports]
+        for port in ports:
+            if await _tcp_reachable(device.ip, port, timeout=0.8):
+                return device.ip
+        return None
+
+    results = await asyncio.gather(*[check_device(d) for d in candidates])
+    return {ip for ip in results if ip}
+
+
 async def scan_networks(networks: list[str], scan_id: int):
     """Escanea múltiples subredes en paralelo y actualiza la base de datos."""
 
@@ -164,6 +206,9 @@ async def scan_networks(networks: list[str], scan_id: int):
         network_counters[network][0] += 1
         return x, y
 
+    # IPs that nmap found this round
+    found_ips = {h["ip"] for h in all_hosts}
+
     with Session(engine) as session:
         # Marcar todos como offline; los encontrados se marcarán online
         now = datetime.utcnow()
@@ -173,6 +218,24 @@ async def scan_networks(networks: list[str], scan_id: int):
                 if device.is_online:  # was online → just went offline
                     device.offline_since = now
                 device.is_online = False
+
+        # Secondary check: devices in scanned networks that nmap MISSED.
+        # Attempt a direct TCP connect to their known port — catches devices
+        # that block ICMP (cameras, CPEs, some routers).
+        scanned_ips = {
+            d.ip for d in session.exec(select(Device)).all()
+            if d.network in networks or d.network is None
+        }
+        missed_ips = scanned_ips - found_ips
+        if missed_ips:
+            tcp_alive = await verify_offline_devices(missed_ips, session)
+            for ip in tcp_alive:
+                device = session.exec(select(Device).where(Device.ip == ip)).first()
+                if device and not device.is_deleted:
+                    device.is_online = True
+                    device.offline_since = None
+                    device.last_seen = now
+                    print(f"[scan] TCP fallback: {ip} is reachable")
 
         for h in all_hosts:
             ip = h["ip"]
