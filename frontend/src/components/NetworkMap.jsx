@@ -15,18 +15,11 @@ function buildEdges(topology, traffic) {
   return topology.links.map(({ source, target }) => {
     const srcTraffic = traffic?.devices?.[String(source)];
     const hasFlow = srcTraffic && (srcTraffic.rx_mbps > 0.1 || srcTraffic.tx_mbps > 0.1);
-    const label = hasFlow
-      ? `↓${srcTraffic.rx_mbps} ↑${srcTraffic.tx_mbps} Mbps`
-      : undefined;
     return {
       id: `e${source}-${target}`,
       source: String(source),
       target: String(target),
       animated: !!hasFlow,
-      label,
-      labelStyle: { fontSize: 9, fill: "#8b949e" },
-      labelBgStyle: { fill: "#161b22", fillOpacity: 0.85 },
-      labelBgPadding: [4, 2],
       style: {
         stroke: hasFlow ? "#3fb950" : "#30363d",
         strokeWidth: hasFlow ? 2 : 1.5,
