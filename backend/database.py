@@ -22,6 +22,7 @@ _MIGRATIONS = [
     "ALTER TABLE device ADD COLUMN monitor_id INTEGER",
     "ALTER TABLE device ADD COLUMN alert_status TEXT",
     "ALTER TABLE device ADD COLUMN offline_since DATETIME",
+    "ALTER TABLE device ADD COLUMN ssh_banner TEXT",
 ]
 
 

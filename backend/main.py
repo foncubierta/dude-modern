@@ -128,6 +128,8 @@ async def enrich_macs_from_mikrotik():
                 if not primary.icon or primary.icon == "unknown":
                     if stale.icon and stale.icon != "unknown":
                         primary.icon = stale.icon
+                if not primary.ssh_banner and stale.ssh_banner:
+                    primary.ssh_banner = stale.ssh_banner
 
                 dedup_n += 1
                 print(f"[enrich_macs] dedup: merged stale {stale.ip} → {primary.ip} (MAC {mac})")
@@ -270,6 +272,10 @@ async def enrich_hostnames_from_discovery():
                     updated = True
                 if device.icon in (None, "unknown") and fp.get("icon"):
                     device.icon = fp["icon"]
+                    updated = True
+                # Store raw SSH banner for the UI indicator
+                if fp.get("ssh_banner") and fp["ssh_banner"] != device.ssh_banner:
+                    device.ssh_banner = fp["ssh_banner"]
                     updated = True
 
         if updated:

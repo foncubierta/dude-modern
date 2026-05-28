@@ -1,4 +1,4 @@
-import { ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { ExternalLink, Pencil, Trash2, Terminal, Globe, Activity } from "lucide-react";
 import { DeviceIcon } from "./DeviceIcon";
 import styles from "./DeviceCard.module.css";
 
@@ -48,6 +48,27 @@ export function DeviceCard({ device, onEdit, onDelete }) {
         {device.mac && <div className={styles.mac}>{device.mac}</div>}
         {device.network && <div className={styles.network}>{device.network}</div>}
       </div>
+
+      {/* ── Capability chips ── */}
+      {(device.ssh_banner || device.web_port || device.monitor_id) && (
+        <div className={styles.chips}>
+          {device.ssh_banner && (
+            <span className={styles.chip} title={device.ssh_banner}>
+              <Terminal size={11} /> SSH
+            </span>
+          )}
+          {device.web_port && (
+            <span className={styles.chip} title={`${device.web_protocol}://${device.ip}:${device.web_port}`}>
+              <Globe size={11} /> Web
+            </span>
+          )}
+          {device.monitor_id && (
+            <span className={`${styles.chip} ${styles.chipMonitor}`} title="Uptime Kuma monitor active">
+              <Activity size={11} /> Monitor
+            </span>
+          )}
+        </div>
+      )}
 
       <div className={styles.actions}>
         {webUrl && (
