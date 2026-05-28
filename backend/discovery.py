@@ -290,12 +290,18 @@ def _ubiquiti_sync(
                 except Exception:
                     pass
 
+        probed_ips = set(broadcast_addrs) | set(unicast_ips)
+
         results: dict[str, dict] = {}
         deadline = time.time() + timeout
         while time.time() < deadline:
             try:
                 data, addr = sock.recvfrom(65507)
                 src_ip = addr[0]
+                # Accept broadcast replies (src not in probed_ips) only if
+                # the packet is a real response (>4 bytes with TLV payload)
+                if src_ip not in probed_ips and len(data) <= 4:
+                    continue   # discard spurious probes from other devices
                 if len(data) < 4 or data[0] not in (0x01, 0x02):
                     continue
                 parsed = _parse_ubiquiti_response(data)
@@ -319,9 +325,11 @@ def _ubiquiti_sync(
 def ubiquiti_probe_raw(ip: str, timeout: float = 3.0) -> dict:
     """
     Send both probe versions to a single IP and return raw debug info.
+    Only counts responses that actually come FROM the target IP.
     Used by the /api/debug/ubiquiti endpoint.
     """
     sock = _make_ubiquiti_socket()
+    side_packets = []
     try:
         for probe in [_UBIQUITI_PROBE_V1, _UBIQUITI_PROBE_V2]:
             sock.sendto(probe, (ip, _UBIQUITI_PORT))
@@ -330,21 +338,36 @@ def ubiquiti_probe_raw(ip: str, timeout: float = 3.0) -> dict:
         while time.time() < deadline:
             try:
                 data, addr = sock.recvfrom(65507)
+                src_ip = addr[0]
+                if src_ip != ip:
+                    # Log side-traffic for diagnostics but don't treat as answer
+                    side_packets.append({
+                        "src_ip":  src_ip,
+                        "raw_hex": data.hex(),
+                        "raw_len": len(data),
+                    })
+                    continue
                 parsed = _parse_ubiquiti_response(data)
                 if "model" in parsed:
                     parsed["icon"] = _ubiquiti_icon(parsed["model"])
                 return {
-                    "raw_hex":  data.hex(),
-                    "raw_len":  len(data),
-                    "header":   data[:4].hex(),
-                    "src_ip":   addr[0],
-                    "parsed":   parsed,
+                    "raw_hex":     data.hex(),
+                    "raw_len":     len(data),
+                    "header":      data[:4].hex(),
+                    "src_ip":      src_ip,
+                    "parsed":      parsed,
+                    "side_packets": side_packets,
                 }
             except socket.timeout:
                 continue
     finally:
         sock.close()
-    return {"raw_hex": None, "parsed": None, "error": "no response"}
+    return {
+        "raw_hex":      None,
+        "parsed":       None,
+        "error":        "no response from target",
+        "side_packets": side_packets,
+    }
 
 
 async def discover_ubiquiti(
