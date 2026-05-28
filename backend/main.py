@@ -251,15 +251,21 @@ async def enrich_hostnames_from_discovery():
                 device.icon = icon_hint
                 updated = True
 
-            # ── Ubiquiti: hostname, model (vendor), firmware, icon ─────────
+            # ── Ubiquiti: hostname, model (vendor), firmware, icon, essid ──
             ub = ubiquiti_data.get(device.ip) if ubiquiti_data else None
             if ub:
                 if not device.hostname and ub.get("hostname"):
                     device.hostname = ub["hostname"]
                     updated = True
-                if not device.vendor and ub.get("model"):
-                    device.vendor = ub["model"]
+                if not device.vendor and (ub.get("model") or ub.get("essid")):
+                    # Use model as vendor; if no model, annotate with SSID
+                    device.vendor = ub.get("model") or f'SSID: {ub["essid"]}'
                     updated = True
+                elif device.vendor and not ub.get("model") and ub.get("essid"):
+                    # Append SSID to existing vendor string if not already there
+                    if "SSID:" not in device.vendor and ub["essid"] not in device.vendor:
+                        device.vendor = f'{device.vendor} (SSID: {ub["essid"]})'
+                        updated = True
                 if device.icon in (None, "unknown") and ub.get("icon"):
                     device.icon = ub["icon"]
                     updated = True

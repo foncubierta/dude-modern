@@ -375,11 +375,37 @@ async def fingerprint_devices(
 
 
 # ── Ubiquiti Discovery Protocol ───────────────────────────────────────────────
+#
+# Protocol reference: https://github.com/digineo/ubnt-tools
+# Packet format: version(1) + command(1) + length(2) + TLV payload
+# Probe: version=1 or 2, command=0, length=0  →  \xVV\x00\x00\x00
+#
+# Targets (from ubnt-tools source):
+#   - Multicast 233.89.188.1:10001  (Ubiquiti multicast group)
+#   - Broadcast 255.255.255.255:10001  (and per-subnet broadcasts)
+#   - Unicast to each device IP  (crosses routed subnets)
+#
+# Source port MUST be 10001 — AirOS devices filter probes by source port.
 
-_UBIQUITI_PORT    = 10001
-_UBIQUITI_PROBE_V1 = bytes([0x01, 0x00, 0x00, 0x00])   # AirOS v1
-_UBIQUITI_PROBE_V2 = bytes([0x02, 0x0a, 0x00, 0x00])   # UniFi v2
-_UBIQUITI_PROBE    = _UBIQUITI_PROBE_V1                 # default
+_UBIQUITI_PORT      = 10001
+_UBIQUITI_MULTICAST = "233.89.188.1"          # Ubiquiti discovery multicast group
+_UBIQUITI_PROBE_V1  = bytes([0x01, 0x00, 0x00, 0x00])   # AirOS / airMAX
+_UBIQUITI_PROBE_V2  = bytes([0x02, 0x00, 0x00, 0x00])   # UniFi OS / EdgeOS
+
+
+# TLV tag IDs (from ubnt-tools/discovery/tag.go)
+_TAG_MAC        = 0x01   # 6-byte MAC
+_TAG_IP_INFO    = 0x02   # 6-byte MAC + 4-byte IP
+_TAG_FIRMWARE   = 0x03   # string
+_TAG_UPTIME     = 0x0A   # uint32 seconds
+_TAG_HOSTNAME   = 0x0B   # string
+_TAG_PLATFORM   = 0x0C   # string  (platform/model for V1 AirOS)
+_TAG_ESSID      = 0x0D   # string  (wireless SSID)
+_TAG_WMODE      = 0x0E   # uint8   (2=Station, 3=AccessPoint)
+_TAG_WEBUI      = 0x0F   # string  (Web UI URL)
+_TAG_MODEL_V1   = 0x14   # string  (model name, V1 protocol)
+_TAG_MODEL_V2   = 0x15   # string  (model name, V2 protocol)
+_TAG_SSHD_PORT  = 0x1C   # uint32  (SSH daemon port)
 
 
 def _ubiquiti_icon(model: str) -> str:
@@ -389,17 +415,23 @@ def _ubiquiti_icon(model: str) -> str:
     if any(x in m for x in (
         "UAP", "U2-", "U5-", "U6-", "U7-", "UNIFI-AP",
         "NANOSTATION", "NANOB", "BULLET", "POWERBEAM",
-        "LITEBEAM", "AIRFIBER", "CPE",
+        "LITEBEAM", "AIRFIBER", "CPE", "NANOBEAM",
     )):
         return "ap"
-    # EdgeRouter, UDM, USG, etc.
+    # EdgeRouter, UDM, USG, ERLite, etc.
     return "router"
 
 
 def _parse_ubiquiti_response(data: bytes) -> dict:
-    """Parse Ubiquiti TLV response payload (skip 4-byte header)."""
+    """
+    Parse Ubiquiti TLV response.
+    Header: version(1) + command(1) + length(2) — skip 4 bytes, then read TLVs.
+    Each TLV: type(1) + length(2, big-endian) + value(n).
+    """
+    if len(data) < 4:
+        return {}
     result: dict = {}
-    offset = 4          # skip header
+    offset = 4          # skip 4-byte header
     n = len(data)
     while offset + 3 <= n:
         tlv_type = data[offset]
@@ -410,19 +442,34 @@ def _parse_ubiquiti_response(data: bytes) -> dict:
         value   = data[offset: offset + tlv_len]
         offset += tlv_len
 
-        if tlv_type == 0x01 and tlv_len == 6:
-            result["mac"] = ":".join(f"{b:02X}" for b in value)
-        elif tlv_type == 0x02 and tlv_len == 10:
-            # 6-byte MAC + 4-byte IP
-            result.setdefault("ip", socket.inet_ntoa(value[6:10]))
-        elif tlv_type == 0x03:
-            result["firmware"] = value.decode("utf-8", errors="ignore").strip()
-        elif tlv_type == 0x0A and tlv_len == 4:
-            result["uptime"] = struct.unpack_from(">I", value)[0]
-        elif tlv_type == 0x0B:
-            result["hostname"] = value.decode("utf-8", errors="ignore").strip()
-        elif tlv_type == 0x0C:
-            result["model"] = value.decode("utf-8", errors="ignore").strip()
+        try:
+            if tlv_type == _TAG_MAC and tlv_len == 6:
+                result["mac"] = ":".join(f"{b:02X}" for b in value)
+            elif tlv_type == _TAG_IP_INFO and tlv_len >= 10:
+                # 6-byte MAC + 4-byte IP (may repeat for multiple interfaces)
+                result.setdefault("ip", socket.inet_ntoa(value[6:10]))
+            elif tlv_type == _TAG_FIRMWARE:
+                result["firmware"] = value.decode("utf-8", errors="ignore").strip()
+            elif tlv_type == _TAG_UPTIME and tlv_len == 4:
+                result["uptime"] = struct.unpack_from(">I", value)[0]
+            elif tlv_type == _TAG_HOSTNAME:
+                result["hostname"] = value.decode("utf-8", errors="ignore").strip()
+            elif tlv_type == _TAG_PLATFORM:
+                # Platform string (e.g. "ERLite-3") — use as model if no explicit model yet
+                result.setdefault("model", value.decode("utf-8", errors="ignore").strip())
+            elif tlv_type == _TAG_ESSID:
+                result["essid"] = value.decode("utf-8", errors="ignore").strip()
+            elif tlv_type == _TAG_WMODE and tlv_len == 1:
+                result["wmode"] = "ap" if value[0] == 3 else "station"
+            elif tlv_type == _TAG_WEBUI:
+                result["webui"] = value.decode("utf-8", errors="ignore").strip()
+            elif tlv_type in (_TAG_MODEL_V1, _TAG_MODEL_V2):
+                # Explicit model tag (takes precedence over platform tag)
+                result["model"] = value.decode("utf-8", errors="ignore").strip()
+            elif tlv_type == _TAG_SSHD_PORT and tlv_len == 4:
+                result["ssh_port"] = struct.unpack_from(">I", value)[0]
+        except Exception:
+            pass
 
     return result
 
@@ -430,8 +477,8 @@ def _parse_ubiquiti_response(data: bytes) -> dict:
 def _make_ubiquiti_socket() -> socket.socket:
     """
     Create a UDP socket for Ubiquiti discovery.
-    Many Ubiquiti devices only respond when the probe arrives FROM port 10001,
-    so we try to bind to that port first and fall back to any free port.
+    Source port MUST be 10001 — AirOS/airMAX devices filter by source port.
+    Falls back to any free port if 10001 is already bound.
     """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -451,13 +498,22 @@ def _ubiquiti_sync(
 ) -> dict[str, dict]:
     """
     Send Ubiquiti discovery probes (v1 + v2) and collect responses.
-    - broadcast_addrs: subnet broadcast IPs (same L2 segment only)
-    - unicast_ips: individual device IPs (crosses routed subnets)
+
+    Target order:
+    1. Multicast 233.89.188.1 — Ubiquiti multicast group (AirOS CPE devices use this)
+    2. Per-subnet broadcast addresses
+    3. Unicast to each known device IP (crosses routed subnets)
     """
     sock = _make_ubiquiti_socket()
     probes = [_UBIQUITI_PROBE_V1, _UBIQUITI_PROBE_V2]
-    targets = [(a, _UBIQUITI_PORT) for a in broadcast_addrs] + \
-              [(ip, _UBIQUITI_PORT) for ip in unicast_ips]
+
+    # Multicast first, then broadcast, then unicast
+    targets = (
+        [(_UBIQUITI_MULTICAST, _UBIQUITI_PORT)] +
+        [(a, _UBIQUITI_PORT) for a in broadcast_addrs] +
+        [(ip, _UBIQUITI_PORT) for ip in unicast_ips]
+    )
+
     try:
         for probe in probes:
             for target in targets:
@@ -466,7 +522,7 @@ def _ubiquiti_sync(
                 except Exception:
                     pass
 
-        probed_ips = set(broadcast_addrs) | set(unicast_ips)
+        probed_ips = {_UBIQUITI_MULTICAST} | set(broadcast_addrs) | set(unicast_ips)
 
         results: dict[str, dict] = {}
         deadline = time.time() + timeout
@@ -474,17 +530,18 @@ def _ubiquiti_sync(
             try:
                 data, addr = sock.recvfrom(65507)
                 src_ip = addr[0]
-                # Accept broadcast replies (src not in probed_ips) only if
-                # the packet is a real response (>4 bytes with TLV payload)
+                # Discard tiny packets from devices we didn't probe
+                # (they're sending their own discovery probes, not responses)
                 if src_ip not in probed_ips and len(data) <= 4:
-                    continue   # discard spurious probes from other devices
+                    continue
                 if len(data) < 4 or data[0] not in (0x01, 0x02):
                     continue
                 parsed = _parse_ubiquiti_response(data)
                 if not parsed:
                     continue
-                if "model" in parsed:
-                    parsed["icon"] = _ubiquiti_icon(parsed["model"])
+                model = parsed.get("model", "")
+                if model:
+                    parsed["icon"] = _ubiquiti_icon(model)
                 ip = parsed.get("ip") or src_ip
                 results[ip] = parsed
                 if src_ip != ip:
@@ -501,7 +558,7 @@ def _ubiquiti_sync(
 def ubiquiti_probe_raw(ip: str, timeout: float = 3.0) -> dict:
     """
     Send both probe versions to a single IP and return raw debug info.
-    Only counts responses that actually come FROM the target IP.
+    Also tries multicast to help diagnose devices that ignore unicast probes.
     Used by the /api/debug/ubiquiti endpoint.
     """
     sock = _make_ubiquiti_socket()
@@ -509,6 +566,11 @@ def ubiquiti_probe_raw(ip: str, timeout: float = 3.0) -> dict:
     try:
         for probe in [_UBIQUITI_PROBE_V1, _UBIQUITI_PROBE_V2]:
             sock.sendto(probe, (ip, _UBIQUITI_PORT))
+            # Also send to multicast in case device responds via that path
+            try:
+                sock.sendto(probe, (_UBIQUITI_MULTICAST, _UBIQUITI_PORT))
+            except Exception:
+                pass
 
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -516,7 +578,6 @@ def ubiquiti_probe_raw(ip: str, timeout: float = 3.0) -> dict:
                 data, addr = sock.recvfrom(65507)
                 src_ip = addr[0]
                 if src_ip != ip:
-                    # Log side-traffic for diagnostics but don't treat as answer
                     side_packets.append({
                         "src_ip":  src_ip,
                         "raw_hex": data.hex(),
@@ -524,14 +585,15 @@ def ubiquiti_probe_raw(ip: str, timeout: float = 3.0) -> dict:
                     })
                     continue
                 parsed = _parse_ubiquiti_response(data)
-                if "model" in parsed:
-                    parsed["icon"] = _ubiquiti_icon(parsed["model"])
+                model = parsed.get("model", "")
+                if model:
+                    parsed["icon"] = _ubiquiti_icon(model)
                 return {
-                    "raw_hex":     data.hex(),
-                    "raw_len":     len(data),
-                    "header":      data[:4].hex(),
-                    "src_ip":      src_ip,
-                    "parsed":      parsed,
+                    "raw_hex":      data.hex(),
+                    "raw_len":      len(data),
+                    "header":       data[:4].hex(),
+                    "src_ip":       src_ip,
+                    "parsed":       parsed,
                     "side_packets": side_packets,
                 }
             except socket.timeout:
@@ -554,11 +616,12 @@ async def discover_ubiquiti(
     """
     Ubiquiti Discovery Protocol (UDP 10001).
 
-    Two complementary strategies:
+    Three complementary strategies:
+    - Multicast to 233.89.188.1 (Ubiquiti group — AirOS CPE devices listen here)
     - Broadcast to each subnet's broadcast address (same L2 only)
     - Unicast to every known device IP (works across routed subnets)
 
-    Returns {ip: {hostname?, model?, firmware?, mac?, uptime?, icon?}}.
+    Returns {ip: {hostname?, model?, firmware?, mac?, uptime?, essid?, icon?}}.
     """
     broadcast_addrs = ["255.255.255.255"]
     for net in (networks or []):
