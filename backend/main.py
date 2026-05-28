@@ -199,18 +199,20 @@ async def enrich_hostnames_from_discovery():
     from sqlmodel import Session as S
 
     with S(engine) as session:
-        devices  = session.exec(select(Device).where(Device.is_deleted == False)).all()
-        ips      = [d.ip for d in devices]
-        networks = get_configured_networks(session)
+        devices       = session.exec(select(Device).where(Device.is_deleted == False)).all()
+        ips           = [d.ip for d in devices]
+        networks      = get_configured_networks(session)
+        ip_port_pairs = [(d.ip, d.web_port) for d in devices]
 
     if not ips:
         return
 
-    mdns_result, ssdp_names, netbios_names, ubiquiti_data = await asyncio.gather(
+    mdns_result, ssdp_names, netbios_names, ubiquiti_data, fp_data = await asyncio.gather(
         discovery.discover_mdns(timeout=6.0),
         discovery.discover_ssdp(timeout=4.0),
         discovery.discover_netbios(ips, timeout=0.8),
         discovery.discover_ubiquiti(networks, unicast_ips=ips, timeout=3.0),
+        discovery.fingerprint_devices(ip_port_pairs, timeout=1.5),
         return_exceptions=True,
     )
 
@@ -223,6 +225,7 @@ async def enrich_hostnames_from_discovery():
     if isinstance(ssdp_names, Exception):    ssdp_names    = {}
     if isinstance(netbios_names, Exception): netbios_names = {}
     if isinstance(ubiquiti_data, Exception): ubiquiti_data = {}
+    if isinstance(fp_data, Exception):       fp_data       = {}
 
     # Merge generic names: NetBIOS < SSDP < mDNS (highest priority wins)
     merged_names: dict[str, str] = {}
@@ -257,6 +260,16 @@ async def enrich_hostnames_from_discovery():
                     updated = True
                 if device.icon in (None, "unknown") and ub.get("icon"):
                     device.icon = ub["icon"]
+                    updated = True
+
+            # ── SSH / HTTP fingerprint ─────────────────────────────────────
+            fp = fp_data.get(device.ip) if fp_data else None
+            if fp:
+                if not device.vendor and fp.get("vendor"):
+                    device.vendor = fp["vendor"]
+                    updated = True
+                if device.icon in (None, "unknown") and fp.get("icon"):
+                    device.icon = fp["icon"]
                     updated = True
 
         if updated:
@@ -918,11 +931,21 @@ async def receive_webhook(payload: dict, session: Session = Depends(get_session)
 async def debug_ubiquiti(ip: str):
     """
     Send Ubiquiti discovery probes directly to a single IP and return
-    the raw response + parsed fields. Useful for diagnosing why a device
-    isn't being enriched automatically.
+    the raw response + parsed fields.
     Usage: GET /api/debug/ubiquiti?ip=192.168.1.91
     """
     result = await asyncio.to_thread(discovery.ubiquiti_probe_raw, ip, 3.0)
+    return result
+
+
+@app.get("/api/debug/fingerprint")
+async def debug_fingerprint(ip: str, port: Optional[int] = None):
+    """
+    Grab SSH banner (port 22) and HTTP title/Server header for a device.
+    Usage: GET /api/debug/fingerprint?ip=192.168.1.91
+           GET /api/debug/fingerprint?ip=192.168.1.91&port=8080
+    """
+    result = await discovery.fingerprint_device(ip, port, timeout=3.0)
     return result
 
 

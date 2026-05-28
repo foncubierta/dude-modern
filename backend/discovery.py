@@ -198,6 +198,165 @@ async def discover_netbios(ips: list[str], timeout: float = 0.8) -> dict[str, st
     }
 
 
+# ── TCP Banner / HTTP fingerprinting ─────────────────────────────────────────
+
+# SSH banner keywords → (vendor label, icon)
+_SSH_HINTS: list[tuple[str, str, str]] = [
+    ("UBNT",      "Ubiquiti",       "ap"),
+    ("ubnt",      "Ubiquiti",       "ap"),
+    ("AirOS",     "Ubiquiti AirOS", "ap"),
+    ("UniFi",     "Ubiquiti UniFi", "router"),
+    ("RouterOS",  "MikroTik",       "router"),
+    ("MikroTik",  "MikroTik",       "router"),
+    ("Cisco",     "Cisco",          "router"),
+    ("Juniper",   "Juniper",        "router"),
+    ("Synology",  "Synology",       "server"),
+    ("QNAP",      "QNAP",           "server"),
+    ("Hikvision", "Hikvision",      "camera"),
+    ("Dahua",     "Dahua",          "camera"),
+    ("Axis",      "Axis",           "camera"),
+    ("dropbear",  None,             None),   # embedded Linux — no vendor assumed
+]
+
+# HTTP page title / Server header keywords → (vendor label, icon)
+_HTTP_HINTS: list[tuple[str, str, str]] = [
+    ("AirOS",      "Ubiquiti AirOS", "ap"),
+    ("airMAX",     "Ubiquiti AirMAX","ap"),
+    ("UniFi",      "Ubiquiti UniFi", "router"),
+    ("EdgeOS",     "Ubiquiti EdgeOS","router"),
+    ("RouterOS",   "MikroTik",       "router"),
+    ("MikroTik",   "MikroTik",       "router"),
+    ("Synology",   "Synology",       "server"),
+    ("QNAP",       "QNAP",           "server"),
+    ("Hikvision",  "Hikvision",      "camera"),
+    ("Dahua",      "Dahua",          "camera"),
+    ("Proxmox",    "Proxmox",        "server"),
+    ("pfSense",    "pfSense",        "router"),
+    ("OPNsense",   "OPNsense",       "router"),
+    ("OpenWrt",    "OpenWrt",        "router"),
+    ("DD-WRT",     "DD-WRT",         "router"),
+    ("Home Assistant", "Home Assistant", "server"),
+    ("Frigate",    "Frigate",        "server"),
+]
+
+
+def _apply_hints(text: str, hints: list[tuple]) -> tuple[str | None, str | None]:
+    """Return (vendor, icon) for the first matching hint keyword."""
+    for keyword, vendor, icon in hints:
+        if keyword.lower() in text.lower():
+            return vendor, icon
+    return None, None
+
+
+async def _grab_ssh_banner(ip: str, timeout: float) -> str | None:
+    """Return the SSH version string (first line) or None."""
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, 22), timeout=timeout
+        )
+        line = await asyncio.wait_for(reader.readline(), timeout=timeout)
+        writer.close()
+        await writer.wait_closed()
+        return line.decode("utf-8", errors="ignore").strip()
+    except Exception:
+        return None
+
+
+async def _grab_http_title(ip: str, port: int, timeout: float) -> str | None:
+    """Return HTTP page title or Server header, or None."""
+    try:
+        ssl_ctx = None
+        if port in (443, 8443):
+            import ssl
+            ssl_ctx = ssl.create_default_context()
+            ssl_ctx.check_hostname = False
+            ssl_ctx.verify_mode = ssl.CERT_NONE
+
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(ip, port, ssl=ssl_ctx), timeout=timeout
+        )
+        writer.write(
+            f"GET / HTTP/1.0\r\nHost: {ip}\r\nUser-Agent: DudeModern/1.0\r\n\r\n"
+            .encode()
+        )
+        await writer.drain()
+
+        data = b""
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                chunk = await asyncio.wait_for(reader.read(4096), timeout=0.8)
+                if not chunk:
+                    break
+                data += chunk
+                if b"</title>" in data.lower() or len(data) > 8192:
+                    break
+            except Exception:
+                break
+        writer.close()
+
+        text = data.decode("utf-8", errors="ignore")
+        # Try <title> first
+        m = re.search(r"<title[^>]*>(.*?)</title>", text, re.IGNORECASE | re.DOTALL)
+        if m:
+            return m.group(1).strip()[:120]
+        # Fall back to Server header
+        m = re.search(r"\nServer:\s*(.+)", text, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()[:120]
+    except Exception:
+        pass
+    return None
+
+
+async def fingerprint_device(ip: str, web_port: int | None = None,
+                              timeout: float = 2.0) -> dict:
+    """
+    Grab SSH banner + HTTP title for a single device.
+    Returns {ssh_banner, http_title, vendor, icon}.
+    """
+    tasks = [_grab_ssh_banner(ip, timeout)]
+    http_port = web_port or 80
+    tasks.append(_grab_http_title(ip, http_port, timeout))
+
+    ssh_banner, http_title = await asyncio.gather(*tasks, return_exceptions=True)
+    if isinstance(ssh_banner, Exception):  ssh_banner = None
+    if isinstance(http_title, Exception):  http_title = None
+
+    vendor, icon = None, None
+    if ssh_banner:
+        vendor, icon = _apply_hints(ssh_banner, _SSH_HINTS)
+    if http_title and not vendor:
+        vendor, icon = _apply_hints(http_title, _HTTP_HINTS)
+
+    return {
+        "ssh_banner": ssh_banner,
+        "http_title": http_title,
+        "vendor":     vendor,
+        "icon":       icon,
+    }
+
+
+async def fingerprint_devices(
+    ip_port_pairs: list[tuple[str, int | None]],
+    timeout: float = 1.5,
+) -> dict[str, dict]:
+    """
+    Fingerprint multiple devices in parallel.
+    ip_port_pairs: [(ip, web_port_or_None), ...]
+    Returns {ip: {ssh_banner, http_title, vendor, icon}}.
+    """
+    results = await asyncio.gather(
+        *[fingerprint_device(ip, port, timeout) for ip, port in ip_port_pairs],
+        return_exceptions=True,
+    )
+    return {
+        ip: r
+        for (ip, _), r in zip(ip_port_pairs, results)
+        if isinstance(r, dict) and (r.get("vendor") or r.get("ssh_banner") or r.get("http_title"))
+    }
+
+
 # ── Ubiquiti Discovery Protocol ───────────────────────────────────────────────
 
 _UBIQUITI_PORT    = 10001
