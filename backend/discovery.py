@@ -200,8 +200,10 @@ async def discover_netbios(ips: list[str], timeout: float = 0.8) -> dict[str, st
 
 # ── Ubiquiti Discovery Protocol ───────────────────────────────────────────────
 
-_UBIQUITI_PORT   = 10001
-_UBIQUITI_PROBE  = bytes([0x01, 0x00, 0x00, 0x00])   # v1 discovery probe
+_UBIQUITI_PORT    = 10001
+_UBIQUITI_PROBE_V1 = bytes([0x01, 0x00, 0x00, 0x00])   # AirOS v1
+_UBIQUITI_PROBE_V2 = bytes([0x02, 0x0a, 0x00, 0x00])   # UniFi v2
+_UBIQUITI_PROBE    = _UBIQUITI_PROBE_V1                 # default
 
 
 def _ubiquiti_icon(model: str) -> str:
@@ -249,35 +251,44 @@ def _parse_ubiquiti_response(data: bytes) -> dict:
     return result
 
 
+def _make_ubiquiti_socket() -> socket.socket:
+    """
+    Create a UDP socket for Ubiquiti discovery.
+    Many Ubiquiti devices only respond when the probe arrives FROM port 10001,
+    so we try to bind to that port first and fall back to any free port.
+    """
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.settimeout(0.5)
+    try:
+        sock.bind(("", _UBIQUITI_PORT))   # preferred: source port = 10001
+    except OSError:
+        sock.bind(("", 0))                # fallback: any free port
+    return sock
+
+
 def _ubiquiti_sync(
     broadcast_addrs: list[str],
     unicast_ips: list[str],
     timeout: float,
 ) -> dict[str, dict]:
     """
-    Send Ubiquiti discovery probes and collect responses.
-    - broadcast_addrs: subnet broadcast IPs (only works on same L2 segment)
-    - unicast_ips: individual device IPs (works across routed subnets)
+    Send Ubiquiti discovery probes (v1 + v2) and collect responses.
+    - broadcast_addrs: subnet broadcast IPs (same L2 segment only)
+    - unicast_ips: individual device IPs (crosses routed subnets)
     """
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.settimeout(0.5)
-    sock.bind(("", 0))
+    sock = _make_ubiquiti_socket()
+    probes = [_UBIQUITI_PROBE_V1, _UBIQUITI_PROBE_V2]
+    targets = [(a, _UBIQUITI_PORT) for a in broadcast_addrs] + \
+              [(ip, _UBIQUITI_PORT) for ip in unicast_ips]
     try:
-        # Broadcast probes (local subnet only)
-        for addr in broadcast_addrs:
-            try:
-                sock.sendto(_UBIQUITI_PROBE, (addr, _UBIQUITI_PORT))
-            except Exception:
-                pass
-
-        # Unicast probes to every known device IP (crosses routed subnets)
-        for ip in unicast_ips:
-            try:
-                sock.sendto(_UBIQUITI_PROBE, (ip, _UBIQUITI_PORT))
-            except Exception:
-                pass
+        for probe in probes:
+            for target in targets:
+                try:
+                    sock.sendto(probe, target)
+                except Exception:
+                    pass
 
         results: dict[str, dict] = {}
         deadline = time.time() + timeout
@@ -292,7 +303,6 @@ def _ubiquiti_sync(
                     continue
                 if "model" in parsed:
                     parsed["icon"] = _ubiquiti_icon(parsed["model"])
-                # Use TLV-reported IP when available; fall back to UDP source
                 ip = parsed.get("ip") or src_ip
                 results[ip] = parsed
                 if src_ip != ip:
@@ -304,6 +314,37 @@ def _ubiquiti_sync(
     finally:
         sock.close()
     return results
+
+
+def ubiquiti_probe_raw(ip: str, timeout: float = 3.0) -> dict:
+    """
+    Send both probe versions to a single IP and return raw debug info.
+    Used by the /api/debug/ubiquiti endpoint.
+    """
+    sock = _make_ubiquiti_socket()
+    try:
+        for probe in [_UBIQUITI_PROBE_V1, _UBIQUITI_PROBE_V2]:
+            sock.sendto(probe, (ip, _UBIQUITI_PORT))
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                data, addr = sock.recvfrom(65507)
+                parsed = _parse_ubiquiti_response(data)
+                if "model" in parsed:
+                    parsed["icon"] = _ubiquiti_icon(parsed["model"])
+                return {
+                    "raw_hex":  data.hex(),
+                    "raw_len":  len(data),
+                    "header":   data[:4].hex(),
+                    "src_ip":   addr[0],
+                    "parsed":   parsed,
+                }
+            except socket.timeout:
+                continue
+    finally:
+        sock.close()
+    return {"raw_hex": None, "parsed": None, "error": "no response"}
 
 
 async def discover_ubiquiti(

@@ -912,6 +912,20 @@ async def receive_webhook(payload: dict, session: Session = Depends(get_session)
     return {"ok": True}
 
 
+# ── Debug / diagnostics ──────────────────────────────────────────────────────
+
+@app.get("/api/debug/ubiquiti")
+async def debug_ubiquiti(ip: str):
+    """
+    Send Ubiquiti discovery probes directly to a single IP and return
+    the raw response + parsed fields. Useful for diagnosing why a device
+    isn't being enriched automatically.
+    Usage: GET /api/debug/ubiquiti?ip=192.168.1.91
+    """
+    result = await asyncio.to_thread(discovery.ubiquiti_probe_raw, ip, 3.0)
+    return result
+
+
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/stats")
