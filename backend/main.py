@@ -210,7 +210,7 @@ async def enrich_hostnames_from_discovery():
         discovery.discover_mdns(timeout=6.0),
         discovery.discover_ssdp(timeout=4.0),
         discovery.discover_netbios(ips, timeout=0.8),
-        discovery.discover_ubiquiti(networks, timeout=3.0),
+        discovery.discover_ubiquiti(networks, unicast_ips=ips, timeout=3.0),
         return_exceptions=True,
     )
 

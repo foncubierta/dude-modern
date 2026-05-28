@@ -249,16 +249,33 @@ def _parse_ubiquiti_response(data: bytes) -> dict:
     return result
 
 
-def _ubiquiti_sync(broadcast_addrs: list[str], timeout: float) -> dict[str, dict]:
+def _ubiquiti_sync(
+    broadcast_addrs: list[str],
+    unicast_ips: list[str],
+    timeout: float,
+) -> dict[str, dict]:
+    """
+    Send Ubiquiti discovery probes and collect responses.
+    - broadcast_addrs: subnet broadcast IPs (only works on same L2 segment)
+    - unicast_ips: individual device IPs (works across routed subnets)
+    """
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.settimeout(0.5)
     sock.bind(("", 0))
     try:
+        # Broadcast probes (local subnet only)
         for addr in broadcast_addrs:
             try:
                 sock.sendto(_UBIQUITI_PROBE, (addr, _UBIQUITI_PORT))
+            except Exception:
+                pass
+
+        # Unicast probes to every known device IP (crosses routed subnets)
+        for ip in unicast_ips:
+            try:
+                sock.sendto(_UBIQUITI_PROBE, (ip, _UBIQUITI_PORT))
             except Exception:
                 pass
 
@@ -273,14 +290,13 @@ def _ubiquiti_sync(broadcast_addrs: list[str], timeout: float) -> dict[str, dict
                 parsed = _parse_ubiquiti_response(data)
                 if not parsed:
                     continue
-                # Derive icon from model
                 if "model" in parsed:
                     parsed["icon"] = _ubiquiti_icon(parsed["model"])
-                # Use TLV-reported IP when available (more reliable than UDP src)
+                # Use TLV-reported IP when available; fall back to UDP source
                 ip = parsed.get("ip") or src_ip
                 results[ip] = parsed
                 if src_ip != ip:
-                    results[src_ip] = parsed   # index by both just in case
+                    results[src_ip] = parsed
             except socket.timeout:
                 continue
             except Exception:
@@ -292,11 +308,16 @@ def _ubiquiti_sync(broadcast_addrs: list[str], timeout: float) -> dict[str, dict
 
 async def discover_ubiquiti(
     networks: list[str] | None = None,
+    unicast_ips: list[str] | None = None,
     timeout: float = 3.0,
 ) -> dict[str, dict]:
     """
     Ubiquiti Discovery Protocol (UDP 10001).
-    Sends a broadcast probe to each subnet + 255.255.255.255.
+
+    Two complementary strategies:
+    - Broadcast to each subnet's broadcast address (same L2 only)
+    - Unicast to every known device IP (works across routed subnets)
+
     Returns {ip: {hostname?, model?, firmware?, mac?, uptime?, icon?}}.
     """
     broadcast_addrs = ["255.255.255.255"]
@@ -307,4 +328,7 @@ async def discover_ubiquiti(
                 broadcast_addrs.append(bcast)
         except Exception:
             pass
-    return await asyncio.to_thread(_ubiquiti_sync, broadcast_addrs, timeout)
+
+    return await asyncio.to_thread(
+        _ubiquiti_sync, broadcast_addrs, unicast_ips or [], timeout
+    )
