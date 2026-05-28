@@ -215,7 +215,7 @@ _SSH_HINTS: list[tuple[str, str, str]] = [
     ("Hikvision", "Hikvision",      "camera"),
     ("Dahua",     "Dahua",          "camera"),
     ("Axis",      "Axis",           "camera"),
-    ("dropbear",  None,             None),   # embedded Linux — no vendor assumed
+    ("dropbear",  "Embedded/Network", "unknown"),  # generic embedded Linux
 ]
 
 # HTTP page title / Server header keywords → (vendor label, icon)
@@ -314,14 +314,31 @@ async def fingerprint_device(ip: str, web_port: int | None = None,
     """
     Grab SSH banner + HTTP title for a single device.
     Returns {ssh_banner, http_title, vendor, icon}.
-    """
-    tasks = [_grab_ssh_banner(ip, timeout)]
-    http_port = web_port or 80
-    tasks.append(_grab_http_title(ip, http_port, timeout))
 
-    ssh_banner, http_title = await asyncio.gather(*tasks, return_exceptions=True)
-    if isinstance(ssh_banner, Exception):  ssh_banner = None
-    if isinstance(http_title, Exception):  http_title = None
+    HTTP probing order:
+    1. web_port if provided (device-specific)
+    2. Port 80 (plain HTTP)
+    3. Port 443 (HTTPS, fallback — many embedded devices redirect 80→443)
+    """
+    # Determine which HTTP ports to try, avoiding duplicates
+    http_ports: list[int] = []
+    if web_port and web_port not in (80, 443):
+        http_ports.append(web_port)
+    http_ports += [80, 443]
+
+    # Run SSH grab + all HTTP probes in parallel
+    ssh_task = _grab_ssh_banner(ip, timeout)
+    http_tasks = [_grab_http_title(ip, p, timeout) for p in http_ports]
+
+    all_results = await asyncio.gather(ssh_task, *http_tasks, return_exceptions=True)
+    ssh_banner = all_results[0] if not isinstance(all_results[0], Exception) else None
+    http_results = [
+        r if not isinstance(r, Exception) else None
+        for r in all_results[1:]
+    ]
+
+    # Pick the first non-None HTTP result
+    http_title = next((r for r in http_results if r), None)
 
     vendor, icon = None, None
     if ssh_banner:
