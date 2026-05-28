@@ -192,23 +192,25 @@ async def enrich_hostnames_from_mikrotik():
 
 async def enrich_hostnames_from_discovery():
     """
-    Run mDNS, SSDP and NetBIOS discovery in parallel and update device
-    hostnames/icons. Only fills in missing hostnames — never overwrites
-    a user label or an already-set hostname.
+    Run mDNS, SSDP, NetBIOS and Ubiquiti discovery in parallel and update
+    device hostnames/icons/vendors. Only fills in missing values — never
+    overwrites a user label or an already-set hostname.
     """
     from sqlmodel import Session as S
 
     with S(engine) as session:
-        devices = session.exec(select(Device).where(Device.is_deleted == False)).all()
-        ips = [d.ip for d in devices]
+        devices  = session.exec(select(Device).where(Device.is_deleted == False)).all()
+        ips      = [d.ip for d in devices]
+        networks = get_configured_networks(session)
 
     if not ips:
         return
 
-    mdns_result, ssdp_names, netbios_names = await asyncio.gather(
+    mdns_result, ssdp_names, netbios_names, ubiquiti_data = await asyncio.gather(
         discovery.discover_mdns(timeout=6.0),
         discovery.discover_ssdp(timeout=4.0),
         discovery.discover_netbios(ips, timeout=0.8),
+        discovery.discover_ubiquiti(networks, timeout=3.0),
         return_exceptions=True,
     )
 
@@ -218,31 +220,45 @@ async def enrich_hostnames_from_discovery():
     if isinstance(mdns_result, tuple):
         mdns_names, mdns_icons = mdns_result
 
-    if isinstance(ssdp_names, Exception):   ssdp_names   = {}
+    if isinstance(ssdp_names, Exception):    ssdp_names    = {}
     if isinstance(netbios_names, Exception): netbios_names = {}
+    if isinstance(ubiquiti_data, Exception): ubiquiti_data = {}
 
-    # Merge: NetBIOS < SSDP < mDNS (highest priority last, overwrites lower)
+    # Merge generic names: NetBIOS < SSDP < mDNS (highest priority wins)
     merged_names: dict[str, str] = {}
     for source in (netbios_names, ssdp_names, mdns_names):
         if isinstance(source, dict):
             merged_names.update(source)
 
-    if not merged_names and not mdns_icons:
-        return
-
     with S(engine) as session:
         updated = False
         for device in session.exec(select(Device)).all():
-            # Only fill in hostname if currently empty
+
+            # ── Generic hostname (mDNS / SSDP / NetBIOS) ──────────────────
             name = merged_names.get(device.ip)
             if name and not device.hostname:
                 device.hostname = name
                 updated = True
-            # Auto-set icon if still unknown and mDNS gave a hint
+
+            # ── mDNS icon hint ─────────────────────────────────────────────
             icon_hint = mdns_icons.get(device.ip)
             if icon_hint and device.icon in (None, "unknown"):
                 device.icon = icon_hint
                 updated = True
+
+            # ── Ubiquiti: hostname, model (vendor), firmware, icon ─────────
+            ub = ubiquiti_data.get(device.ip) if ubiquiti_data else None
+            if ub:
+                if not device.hostname and ub.get("hostname"):
+                    device.hostname = ub["hostname"]
+                    updated = True
+                if not device.vendor and ub.get("model"):
+                    device.vendor = ub["model"]
+                    updated = True
+                if device.icon in (None, "unknown") and ub.get("icon"):
+                    device.icon = ub["icon"]
+                    updated = True
+
         if updated:
             session.commit()
 

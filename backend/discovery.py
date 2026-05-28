@@ -1,11 +1,13 @@
 """
-Passive network discovery via mDNS, SSDP and NetBIOS.
-All three return {ip: name} dicts used to enrich device hostnames.
+Passive network discovery via mDNS, SSDP, NetBIOS and Ubiquiti Discovery.
+All methods return dicts used to enrich device hostnames and icons.
 """
 
 import asyncio
+import ipaddress
 import re
 import socket
+import struct
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -194,3 +196,115 @@ async def discover_netbios(ips: list[str], timeout: float = 0.8) -> dict[str, st
         for ip, name in zip(ips, results)
         if isinstance(name, str) and name
     }
+
+
+# ── Ubiquiti Discovery Protocol ───────────────────────────────────────────────
+
+_UBIQUITI_PORT   = 10001
+_UBIQUITI_PROBE  = bytes([0x01, 0x00, 0x00, 0x00])   # v1 discovery probe
+
+
+def _ubiquiti_icon(model: str) -> str:
+    m = model.upper()
+    if any(x in m for x in ("USW", "SWITCH")):
+        return "switch"
+    if any(x in m for x in (
+        "UAP", "U2-", "U5-", "U6-", "U7-", "UNIFI-AP",
+        "NANOSTATION", "NANOB", "BULLET", "POWERBEAM",
+        "LITEBEAM", "AIRFIBER", "CPE",
+    )):
+        return "ap"
+    # EdgeRouter, UDM, USG, etc.
+    return "router"
+
+
+def _parse_ubiquiti_response(data: bytes) -> dict:
+    """Parse Ubiquiti TLV response payload (skip 4-byte header)."""
+    result: dict = {}
+    offset = 4          # skip header
+    n = len(data)
+    while offset + 3 <= n:
+        tlv_type = data[offset]
+        tlv_len  = struct.unpack_from(">H", data, offset + 1)[0]
+        offset  += 3
+        if offset + tlv_len > n:
+            break
+        value   = data[offset: offset + tlv_len]
+        offset += tlv_len
+
+        if tlv_type == 0x01 and tlv_len == 6:
+            result["mac"] = ":".join(f"{b:02X}" for b in value)
+        elif tlv_type == 0x02 and tlv_len == 10:
+            # 6-byte MAC + 4-byte IP
+            result.setdefault("ip", socket.inet_ntoa(value[6:10]))
+        elif tlv_type == 0x03:
+            result["firmware"] = value.decode("utf-8", errors="ignore").strip()
+        elif tlv_type == 0x0A and tlv_len == 4:
+            result["uptime"] = struct.unpack_from(">I", value)[0]
+        elif tlv_type == 0x0B:
+            result["hostname"] = value.decode("utf-8", errors="ignore").strip()
+        elif tlv_type == 0x0C:
+            result["model"] = value.decode("utf-8", errors="ignore").strip()
+
+    return result
+
+
+def _ubiquiti_sync(broadcast_addrs: list[str], timeout: float) -> dict[str, dict]:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.settimeout(0.5)
+    sock.bind(("", 0))
+    try:
+        for addr in broadcast_addrs:
+            try:
+                sock.sendto(_UBIQUITI_PROBE, (addr, _UBIQUITI_PORT))
+            except Exception:
+                pass
+
+        results: dict[str, dict] = {}
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                data, addr = sock.recvfrom(65507)
+                src_ip = addr[0]
+                if len(data) < 4 or data[0] not in (0x01, 0x02):
+                    continue
+                parsed = _parse_ubiquiti_response(data)
+                if not parsed:
+                    continue
+                # Derive icon from model
+                if "model" in parsed:
+                    parsed["icon"] = _ubiquiti_icon(parsed["model"])
+                # Use TLV-reported IP when available (more reliable than UDP src)
+                ip = parsed.get("ip") or src_ip
+                results[ip] = parsed
+                if src_ip != ip:
+                    results[src_ip] = parsed   # index by both just in case
+            except socket.timeout:
+                continue
+            except Exception:
+                continue
+    finally:
+        sock.close()
+    return results
+
+
+async def discover_ubiquiti(
+    networks: list[str] | None = None,
+    timeout: float = 3.0,
+) -> dict[str, dict]:
+    """
+    Ubiquiti Discovery Protocol (UDP 10001).
+    Sends a broadcast probe to each subnet + 255.255.255.255.
+    Returns {ip: {hostname?, model?, firmware?, mac?, uptime?, icon?}}.
+    """
+    broadcast_addrs = ["255.255.255.255"]
+    for net in (networks or []):
+        try:
+            bcast = str(ipaddress.ip_network(net, strict=False).broadcast_address)
+            if bcast not in broadcast_addrs:
+                broadcast_addrs.append(bcast)
+        except Exception:
+            pass
+    return await asyncio.to_thread(_ubiquiti_sync, broadcast_addrs, timeout)
