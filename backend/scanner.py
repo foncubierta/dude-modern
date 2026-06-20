@@ -231,7 +231,10 @@ async def scan_networks(networks: list[str], scan_id: int):
             tcp_alive = await verify_offline_devices(missed_ips, session)
             for ip in tcp_alive:
                 device = session.exec(select(Device).where(Device.ip == ip)).first()
-                if device and not device.is_deleted:
+                if device:
+                    if device.is_deleted:
+                        device.is_deleted = False
+                        print(f"[scan] TCP fallback: restored soft-deleted device {ip}")
                     device.is_online = True
                     device.offline_since = None
                     device.last_seen = now
@@ -249,9 +252,10 @@ async def scan_networks(networks: list[str], scan_id: int):
             if not existing:
                 existing = session.exec(select(Device).where(Device.ip == ip)).first()
 
-            # Don't recreate or update soft-deleted devices
+            # If the device was soft-deleted but nmap found it again, restore it
             if existing and existing.is_deleted:
-                continue
+                existing.is_deleted = False
+                print(f"[scan] restored soft-deleted device {ip}")
 
             if existing:
                 existing.is_online = True
