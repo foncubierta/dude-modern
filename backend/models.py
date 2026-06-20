@@ -33,6 +33,7 @@ class Device(SQLModel, table=True):
     alert_status: Optional[str] = None  # "up", "down", or None
     offline_since: Optional[datetime] = None
     ssh_banner: Optional[str] = None    # first line of SSH banner, e.g. "SSH-2.0-dropbear"
+    topology_parent_id: Optional[int] = Field(default=None, foreign_key="device.id")  # manual topology override
 
 
 class ScanLog(SQLModel, table=True):

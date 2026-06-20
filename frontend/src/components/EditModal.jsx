@@ -18,6 +18,7 @@ export function EditModal({ device, devices, onSave, onClose }) {
     tplink_user: device.tplink_user || "",
     tplink_pass: device.tplink_pass || "",
     alias_of: device.alias_of ?? "",
+    topology_parent_id: device.topology_parent_id ?? "",
   });
   const [showMikrotik, setShowMikrotik] = useState(
     !!(device.mikrotik_user || device.mikrotik_pass)
@@ -50,6 +51,7 @@ export function EditModal({ device, devices, onSave, onClose }) {
       tplink_user: form.tplink_user || null,
       tplink_pass: form.tplink_pass || null,
       alias_of: form.alias_of ? Number(form.alias_of) : null,
+      topology_parent_id: form.topology_parent_id ? Number(form.topology_parent_id) : null,
     });
     onClose();
   }
@@ -143,6 +145,30 @@ export function EditModal({ device, devices, onSave, onClose }) {
             {form.alias_of && (
               <span className={styles.aliasHint}>
                 This device will be hidden from the map. Its subnet connections will be handled by the primary device.
+              </span>
+            )}
+          </div>
+        )}
+
+        {devices && devices.filter((d) => d.id !== device.id).length > 0 && (
+          <div className={styles.field}>
+            <label>Connects to (topology)</label>
+            <select
+              value={form.topology_parent_id}
+              onChange={(e) => set("topology_parent_id", e.target.value)}
+            >
+              <option value="">— auto —</option>
+              {devices
+                .filter((d) => d.id !== device.id && !d.alias_of)
+                .map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.label || d.hostname || d.ip}
+                  </option>
+                ))}
+            </select>
+            {form.topology_parent_id && (
+              <span className={styles.aliasHint}>
+                This device will always connect to the selected parent, overriding automatic detection.
               </span>
             )}
           </div>

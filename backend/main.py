@@ -450,6 +450,7 @@ class DeviceUpdate(BaseModel):
     tplink_pass: Optional[str] = None
     alias_of: Optional[int] = None
     is_manual: Optional[bool] = None
+    topology_parent_id: Optional[int] = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -742,6 +743,16 @@ async def get_topology(session: Session = Depends(get_session)):
                 if target and target.id != cpe_dev.id and target.id not in aliased_ids:
                     unique_links = [l for l in unique_links if l["target"] != target.id]
                     unique_links.append({"source": cpe_dev.id, "target": target.id})
+
+    # Manual topology overrides — highest priority, applied last
+    # A device with topology_parent_id set always hangs from that parent,
+    # regardless of what MikroTik/ES/CPE or subnet logic decided.
+    for d in devices:
+        if d.topology_parent_id and d.id not in aliased_ids:
+            parent = next((x for x in devices if x.id == d.topology_parent_id), None)
+            if parent and parent.id not in aliased_ids:
+                unique_links = [l for l in unique_links if l["target"] != d.id]
+                unique_links.append({"source": d.topology_parent_id, "target": d.id})
 
     return {"links": unique_links, "aliases": list(aliased_ids)}
 
