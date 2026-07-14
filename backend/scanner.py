@@ -145,14 +145,34 @@ async def _tcp_reachable(ip: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
+async def _ping_reachable(ip: str) -> bool:
+    """
+    ICMP ping via subprocess. Reliable for devices that block TCP but
+    respond to ping. Works in Docker with network_mode: host.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping", "-c", "1", "-W", "1", ip,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=2.0)
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 async def verify_offline_devices(missed_ips: set[str], session) -> set[str]:
     """
-    For IPs that nmap did NOT find, attempt a direct TCP connect to any
-    known open port (web_port, 80, 22). Returns the subset that ARE reachable.
-    Catches devices that block ICMP but have a web/ssh port open.
+    For IPs that nmap did NOT find, try multiple detection methods in parallel:
+    1. TCP connect to all known/common ports simultaneously
+    2. ICMP ping as final fallback
+
+    Returns the subset of IPs that are actually reachable.
     """
     from sqlmodel import select as sel
-    FALLBACK_PORTS = [80, 22, 443, 8080, 8443]
+
+    FALLBACK_PORTS = [80, 22, 443, 8080, 8443, 8888, 8008, 9000, 9090, 554, 8554]
 
     candidates = session.exec(
         sel(Device).where(Device.ip.in_(missed_ips), Device.is_deleted == False)
@@ -161,14 +181,26 @@ async def verify_offline_devices(missed_ips: set[str], session) -> set[str]:
     if not candidates:
         return set()
 
-    async def check_device(device):
+    async def check_device(device: Device) -> Optional[str]:
+        ip = device.ip
+        # Build port list: device-specific port first, then generic fallbacks
         ports = []
-        if device.web_port:
+        if device.web_port and device.web_port not in FALLBACK_PORTS:
             ports.append(device.web_port)
-        ports += [p for p in FALLBACK_PORTS if p not in ports]
-        for port in ports:
-            if await _tcp_reachable(device.ip, port, timeout=0.8):
-                return device.ip
+        ports += FALLBACK_PORTS
+
+        # Try all TCP ports in parallel — much faster than sequential
+        tcp_results = await asyncio.gather(
+            *[_tcp_reachable(ip, p, timeout=1.0) for p in ports],
+            return_exceptions=True,
+        )
+        if any(r is True for r in tcp_results):
+            return ip
+
+        # Last resort: ICMP ping (catches devices with all TCP ports filtered)
+        if await _ping_reachable(ip):
+            return ip
+
         return None
 
     results = await asyncio.gather(*[check_device(d) for d in candidates])
@@ -215,8 +247,10 @@ async def scan_networks(networks: list[str], scan_id: int):
         for device in session.exec(select(Device)).all():
             # Solo marcar offline los de las redes escaneadas
             if device.network in networks or device.network is None:
-                if device.is_online:  # was online → just went offline
+                if device.is_online:
+                    # Transitioning online→offline: record the moment
                     device.offline_since = now
+                # else: already offline — keep existing offline_since unchanged
                 device.is_online = False
 
         # Secondary check: devices in scanned networks that nmap MISSED.
