@@ -16,6 +16,7 @@ export const api = {
     update: (id, body) => req(`/devices/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
     delete: (id) => req(`/devices/${id}`, { method: "DELETE" }),
     restore: (id) => req(`/devices/${id}/restore`, { method: "POST" }),
+    hardDelete: (id) => req(`/devices/${id}/permanent`, { method: "DELETE" }),
   },
   scan: {
     trigger: () => req("/scan", { method: "POST" }),

@@ -25,6 +25,7 @@ _MIGRATIONS = [
     "ALTER TABLE device ADD COLUMN ssh_banner TEXT",
     "ALTER TABLE device ADD COLUMN topology_parent_id INTEGER REFERENCES device(id)",
     "ALTER TABLE device ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE device ADD COLUMN switch_port TEXT",
 ]
 
 

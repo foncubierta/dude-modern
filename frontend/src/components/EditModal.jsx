@@ -19,6 +19,7 @@ export function EditModal({ device, devices, onSave, onClose }) {
     tplink_pass: device.tplink_pass || "",
     alias_of: device.alias_of ?? "",
     topology_parent_id: device.topology_parent_id ?? "",
+    switch_port: device.switch_port ?? "",
     is_pinned: device.is_pinned ?? false,
   });
   const [showMikrotik, setShowMikrotik] = useState(
@@ -53,6 +54,7 @@ export function EditModal({ device, devices, onSave, onClose }) {
       tplink_pass: form.tplink_pass || null,
       alias_of: form.alias_of ? Number(form.alias_of) : null,
       topology_parent_id: form.topology_parent_id ? Number(form.topology_parent_id) : null,
+      switch_port: form.switch_port || null,
       is_pinned: form.is_pinned,
     });
     onClose();
@@ -183,6 +185,20 @@ export function EditModal({ device, devices, onSave, onClose }) {
                 This device will always connect to the selected parent, overriding automatic detection.
               </span>
             )}
+          </div>
+        )}
+
+        {form.topology_parent_id && (
+          <div className={styles.field}>
+            <label>Port on parent device</label>
+            <input
+              value={form.switch_port}
+              onChange={(e) => set("switch_port", e.target.value)}
+              placeholder="e.g. eth3, gi0/1, Port 5"
+            />
+            <span className={styles.aliasHint}>
+              Shown as a label on the connection line in the topology map.
+            </span>
           </div>
         )}
 

@@ -10,16 +10,24 @@ import styles from "./NetworkMap.module.css";
 
 const nodeTypes = { device: DeviceNode };
 
-function buildEdges(topology, traffic) {
+function buildEdges(topology, traffic, deviceMap) {
   if (!topology?.links) return [];
   return topology.links.map(({ source, target }) => {
     const srcTraffic = traffic?.devices?.[String(source)];
     const hasFlow = srcTraffic && (srcTraffic.rx_mbps > 0.1 || srcTraffic.tx_mbps > 0.1);
+    const port = deviceMap?.get(target)?.switch_port;
     return {
       id: `e${source}-${target}`,
       source: String(source),
       target: String(target),
       animated: !!hasFlow,
+      ...(port ? {
+        label: port,
+        labelStyle: { fontSize: 10, fill: "#8b949e", fontFamily: "monospace" },
+        labelBgStyle: { fill: "var(--bg-card, #161b22)", fillOpacity: 0.85 },
+        labelBgPadding: [4, 3],
+        labelBgBorderRadius: 3,
+      } : {}),
       style: {
         stroke: hasFlow ? "#3fb950" : "#30363d",
         strokeWidth: hasFlow ? 2 : 1.5,
@@ -62,8 +70,9 @@ export function NetworkMap({ devices, topology, traffic, onEdit, onDelete, onMov
   }, [devices, topology, traffic, onEdit, onDelete, activeFilters]);
 
   useEffect(() => {
-    setEdges(buildEdges(topology, traffic));
-  }, [topology, traffic]);
+    const deviceMap = new Map(devices.map((d) => [d.id, d]));
+    setEdges(buildEdges(topology, traffic, deviceMap));
+  }, [topology, traffic, devices]);
 
   const onNodeDragStop = useCallback(
     (_, node) => onMove(Number(node.id), node.position.x, node.position.y),

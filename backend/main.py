@@ -464,6 +464,7 @@ class DeviceUpdate(BaseModel):
     is_manual: Optional[bool] = None
     topology_parent_id: Optional[int] = None
     is_pinned: Optional[bool] = None
+    switch_port: Optional[str] = None
 
 
 @app.patch("/api/devices/{device_id}")
@@ -500,6 +501,16 @@ def restore_device(device_id: int, session: Session = Depends(get_session)):
     session.commit()
     session.refresh(d)
     return d
+
+
+@app.delete("/api/devices/{device_id}/permanent")
+def hard_delete_device(device_id: int, session: Session = Depends(get_session)):
+    d = session.get(Device, device_id)
+    if not d:
+        raise HTTPException(404, "Device not found")
+    session.delete(d)
+    session.commit()
+    return {"ok": True}
 
 
 # ── Scan ─────────────────────────────────────────────────────────────────────

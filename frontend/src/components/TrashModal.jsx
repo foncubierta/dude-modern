@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { X, RotateCcw } from "lucide-react";
+import { X, RotateCcw, Trash2 } from "lucide-react";
 import { api } from "../api";
 import { DeviceIcon } from "./DeviceIcon";
 import styles from "./TrashModal.module.css";
@@ -7,6 +7,7 @@ import styles from "./TrashModal.module.css";
 export function TrashModal({ onClose, onRestored }) {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [confirmId, setConfirmId] = useState(null); // id pending hard-delete confirmation
 
   useEffect(() => { load(); }, []);
 
@@ -26,6 +27,12 @@ export function TrashModal({ onClose, onRestored }) {
     onRestored();
   }
 
+  async function hardDelete(id) {
+    await api.devices.hardDelete(id);
+    setDevices((prev) => prev.filter((d) => d.id !== id));
+    setConfirmId(null);
+  }
+
   return (
     <div className={styles.overlay} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className={styles.modal}>
@@ -37,8 +44,8 @@ export function TrashModal({ onClose, onRestored }) {
             <button className={styles.close} onClick={onClose}><X size={18} /></button>
           </div>
           <p className={styles.desc}>
-            Deleted devices are hidden from the map and ignored by the scanner.
-            Restore a device to bring it back.
+            Deleted devices are hidden from the map. Restore to bring them back,
+            or delete permanently to remove from the database.
           </p>
         </div>
 
@@ -60,10 +67,23 @@ export function TrashModal({ onClose, onRestored }) {
                     <span className={styles.ip}>{d.ip}</span>
                     {d.network && <span className={styles.net}>{d.network}</span>}
                   </div>
-                  <button className={styles.restoreBtn} onClick={() => restore(d.id)} title="Restore">
-                    <RotateCcw size={14} />
-                    Restore
-                  </button>
+
+                  {confirmId === d.id ? (
+                    <div className={styles.confirmRow}>
+                      <span className={styles.confirmText}>Delete forever?</span>
+                      <button className={styles.confirmYes} onClick={() => hardDelete(d.id)}>Yes</button>
+                      <button className={styles.confirmNo} onClick={() => setConfirmId(null)}>No</button>
+                    </div>
+                  ) : (
+                    <div className={styles.btnRow}>
+                      <button className={styles.restoreBtn} onClick={() => restore(d.id)} title="Restore">
+                        <RotateCcw size={13} /> Restore
+                      </button>
+                      <button className={styles.deleteBtn} onClick={() => setConfirmId(d.id)} title="Delete permanently">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

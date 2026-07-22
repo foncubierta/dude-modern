@@ -65,6 +65,10 @@
 .ip { font-family: monospace; font-size: 11px; color: var(--accent); }
 .net { font-size: 10px; color: var(--text-muted); }
 
+.btnRow {
+  display: flex; align-items: center; gap: 5px; flex-shrink: 0;
+}
+
 .restoreBtn {
   display: flex; align-items: center; gap: 5px;
   background: rgba(63,185,80,0.12);
@@ -72,10 +76,38 @@
   border: 1px solid rgba(63,185,80,0.3);
   border-radius: var(--radius);
   padding: 5px 10px; font-size: 12px; font-weight: 600;
-  white-space: nowrap; flex-shrink: 0;
+  white-space: nowrap;
   transition: background 0.15s;
 }
 .restoreBtn:hover { background: rgba(63,185,80,0.22); }
+
+.deleteBtn {
+  display: flex; align-items: center;
+  background: rgba(248,81,73,0.08);
+  color: var(--danger);
+  border: 1px solid rgba(248,81,73,0.25);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  transition: background 0.15s;
+}
+.deleteBtn:hover { background: rgba(248,81,73,0.2); }
+
+.confirmRow {
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+}
+.confirmText { font-size: 11px; color: var(--danger); font-weight: 600; white-space: nowrap; }
+.confirmYes {
+  background: rgba(248,81,73,0.15); color: var(--danger);
+  border: 1px solid rgba(248,81,73,0.4);
+  border-radius: var(--radius); padding: 4px 10px; font-size: 12px; font-weight: 700;
+}
+.confirmYes:hover { background: rgba(248,81,73,0.28); }
+.confirmNo {
+  background: var(--bg-hover); color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 4px 10px; font-size: 12px;
+}
+.confirmNo:hover { color: var(--text-primary); }
 
 .modalFooter {
   position: sticky;
