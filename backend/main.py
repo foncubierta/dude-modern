@@ -121,12 +121,11 @@ async def enrich_macs_from_mikrotik():
 
             primary = online[0]
             for stale in offline:
-                # Never auto-delete if the user put effort into the record
-                if stale.label or stale.monitor_id or stale.mikrotik_user or stale.edgeswitch_user:
-                    # Transfer the label to the current IP record instead
+                # Never auto-delete pinned devices
+                if stale.is_pinned:
                     if stale.label and not primary.label:
                         primary.label = stale.label
-                    stale.is_deleted = True
+                    # still promote data but keep the record alive
                 else:
                     stale.is_deleted = True
 
@@ -464,6 +463,7 @@ class DeviceUpdate(BaseModel):
     alias_of: Optional[int] = None
     is_manual: Optional[bool] = None
     topology_parent_id: Optional[int] = None
+    is_pinned: Optional[bool] = None
 
 
 @app.patch("/api/devices/{device_id}")

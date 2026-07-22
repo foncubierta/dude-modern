@@ -1,4 +1,4 @@
-import { ExternalLink, Pencil, Trash2, Terminal, Globe, Activity } from "lucide-react";
+import { ExternalLink, Pencil, Trash2, Terminal, Globe, Activity, Pin } from "lucide-react";
 import { DeviceIcon } from "./DeviceIcon";
 import styles from "./DeviceCard.module.css";
 
@@ -50,8 +50,13 @@ export function DeviceCard({ device, onEdit, onDelete }) {
       </div>
 
       {/* ── Capability chips ── */}
-      {(device.ssh_banner || device.web_port || device.monitor_id) && (
+      {(device.ssh_banner || device.web_port || device.monitor_id || device.is_pinned) && (
         <div className={styles.chips}>
+          {device.is_pinned && (
+            <span className={`${styles.chip} ${styles.chipPinned}`} title="Pinned — won't be auto-removed">
+              <Pin size={11} /> Pinned
+            </span>
+          )}
           {device.ssh_banner && (
             <span className={styles.chip} title={device.ssh_banner}>
               <Terminal size={11} /> SSH

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X, ChevronDown, ChevronRight, BellPlus, BellOff, Loader } from "lucide-react";
+import { X, ChevronDown, ChevronRight, BellPlus, BellOff, Loader, Pin } from "lucide-react";
 import { DeviceIcon, ICON_TYPES } from "./DeviceIcon";
 import { api } from "../api";
 import styles from "./EditModal.module.css";
@@ -19,6 +19,7 @@ export function EditModal({ device, devices, onSave, onClose }) {
     tplink_pass: device.tplink_pass || "",
     alias_of: device.alias_of ?? "",
     topology_parent_id: device.topology_parent_id ?? "",
+    is_pinned: device.is_pinned ?? false,
   });
   const [showMikrotik, setShowMikrotik] = useState(
     !!(device.mikrotik_user || device.mikrotik_pass)
@@ -52,6 +53,7 @@ export function EditModal({ device, devices, onSave, onClose }) {
       tplink_pass: form.tplink_pass || null,
       alias_of: form.alias_of ? Number(form.alias_of) : null,
       topology_parent_id: form.topology_parent_id ? Number(form.topology_parent_id) : null,
+      is_pinned: form.is_pinned,
     });
     onClose();
   }
@@ -83,6 +85,16 @@ export function EditModal({ device, devices, onSave, onClose }) {
             placeholder={device.hostname || device.ip}
           />
         </div>
+
+        <button
+          type="button"
+          className={`${styles.pinToggle} ${form.is_pinned ? styles.pinActive : ""}`}
+          onClick={() => set("is_pinned", !form.is_pinned)}
+          title="Pinned devices are never auto-removed, even when offline"
+        >
+          <Pin size={14} />
+          {form.is_pinned ? "Pinned — won't be auto-removed" : "Pin device"}
+        </button>
 
         <div className={styles.field}>
           <label>Icon type</label>
