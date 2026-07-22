@@ -57,17 +57,20 @@ async def enrich_macs_from_mikrotik():
         )
 
         # Build IP → MAC map from all MikroTik routers
+        # Also track which routers responded (their own IP is online by definition)
         ip_to_mac: dict[str, str] = {}
-        for arp in arp_results:
+        responding_mt_ips: set[str] = set()
+        for mt_dev, arp in zip(mt_devices, arp_results):
             if isinstance(arp, Exception) or not arp:
                 continue
+            responding_mt_ips.add(mt_dev.ip)   # API responded → router is online
             for entry in arp:
                 mac = entry.get("mac-address", "").upper().strip()
                 ip  = entry.get("address", "").strip()
                 if mac and ip:
                     ip_to_mac[ip] = mac
 
-        if not ip_to_mac:
+        if not ip_to_mac and not responding_mt_ips:
             return
 
         now = datetime.utcnow()
@@ -79,19 +82,22 @@ async def enrich_macs_from_mikrotik():
         updated = False
         for device in session.exec(select(Device).where(Device.is_deleted == False)).all():
             in_arp = device.ip in ip_to_mac
+            is_mt_router = device.ip in responding_mt_ips
 
             # Fill missing MAC
             if not device.mac and in_arp:
                 device.mac = ip_to_mac[device.ip]
                 updated = True
 
-            # Mark online if the MikroTik sees this device in its ARP table
-            if in_arp and not device.is_online:
+            # Mark online if seen in ARP table OR if it IS the responding router
+            # (routers don't have ARP entries for themselves)
+            if (in_arp or is_mt_router) and not device.is_online:
                 device.is_online = True
                 device.offline_since = None
                 device.last_seen = now
                 updated = True
-                print(f"[enrich_macs] ARP-online: {device.ip} ({device.label or device.hostname or ''})")
+                src = "router-api" if is_mt_router else "ARP"
+                print(f"[enrich_macs] {src}-online: {device.ip} ({device.label or device.hostname or ''})")
 
         if updated:
             session.commit()
