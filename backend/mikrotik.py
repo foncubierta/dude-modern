@@ -21,6 +21,49 @@ async def get_arp_table(ip: str, user: str, password: str) -> list[dict]:
     return await _api_get(ip, user, password, "/ip/arp")
 
 
+async def ping_device(router_ip: str, user: str, password: str,
+                      target_ip: str, count: int = 2) -> bool:
+    """
+    Ask the MikroTik to ping target_ip from its own interfaces.
+    Returns True if at least one reply was received.
+    Useful for checking reachability of devices on subnets the backend
+    cannot directly probe.
+    """
+    url = f"http://{router_ip}/rest/tool/ping"
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            r = await client.post(url, auth=(user, password), json={
+                "address": target_ip,
+                "count":   str(count),
+                "interval": "0.1",
+            })
+            if r.status_code != 200:
+                return False
+            results = r.json()
+            # Each result has "received" field; success if any reply came back
+            return any(int(res.get("received", 0)) > 0 for res in results)
+    except Exception as e:
+        print(f"MikroTik ping {router_ip}→{target_ip} error: {e}")
+        return False
+
+
+async def ping_devices(router_ip: str, user: str, password: str,
+                       target_ips: list[str], concurrency: int = 20) -> set[str]:
+    """
+    Ping multiple IPs from the MikroTik in parallel (capped at concurrency).
+    Returns the set of IPs that responded.
+    """
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _check(ip: str) -> str | None:
+        async with sem:
+            ok = await ping_device(router_ip, user, password, ip)
+            return ip if ok else None
+
+    results = await asyncio.gather(*[_check(ip) for ip in target_ips])
+    return {ip for ip in results if ip}
+
+
 async def get_dhcp_leases(ip: str, user: str, password: str) -> list[dict]:
     """DHCP leases with active-hostname — the name the client announced."""
     return await _api_get(ip, user, password, "/ip/dhcp-server/lease")

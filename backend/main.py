@@ -97,6 +97,46 @@ async def enrich_macs_from_mikrotik():
             session.commit()
             print("[enrich_macs] filled MAC addresses / ARP-online from MikroTik")
 
+        # ── Pass 1b: MikroTik ping for devices still offline ─────────────
+        # ARP only catches recently-active devices. For the rest, ask each
+        # MikroTik to ping from its own interfaces — reaches subnets that
+        # the backend VM cannot probe directly.
+        import ipaddress as _ipaddress
+
+        still_offline = session.exec(
+            select(Device).where(Device.is_deleted == False, Device.is_online == False)
+        ).all()
+
+        if still_offline:
+            # Group offline device IPs by which MikroTik router can reach them
+            # (same subnet, or router has no network filter → ping all)
+            for mt_dev in mt_devices:
+                # Determine which subnets this MikroTik knows about
+                # (approximation: use all offline devices — the router will
+                #  simply fail pings for IPs it can't route to)
+                offline_ips = [d.ip for d in still_offline if not d.is_manual]
+                if not offline_ips:
+                    continue
+
+                alive_ips = await mikrotik.ping_devices(
+                    mt_dev.ip, mt_dev.mikrotik_user, mt_dev.mikrotik_pass,
+                    offline_ips, concurrency=15,
+                )
+
+                if alive_ips:
+                    ping_updated = False
+                    for device in still_offline:
+                        if device.ip in alive_ips and not device.is_online:
+                            device.is_online = True
+                            device.offline_since = None
+                            device.last_seen = now
+                            ping_updated = True
+                            print(f"[enrich_macs] ping-online: {device.ip} ({device.label or device.hostname or ''})")
+                    if ping_updated:
+                        session.commit()
+                        # Update still_offline list for subsequent MikroTik routers
+                        still_offline = [d for d in still_offline if not d.is_online]
+
         # ── Pass 2: deduplicate same-MAC records ──────────────────────────
         # After filling MACs we may have two records for the same physical
         # device: one online (new IP) and one offline (old IP). Merge them.
