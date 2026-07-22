@@ -56,14 +56,15 @@ async def enrich_macs_from_mikrotik():
             return_exceptions=True,
         )
 
-        # Build IP → MAC map from all MikroTik routers
-        # Also track which routers responded (their own IP is online by definition)
+        # Build IP → MAC map from all MikroTik routers.
+        # Also track which routers responded — they won't appear in their own ARP
+        # table, so the API response is the only proof they're online.
         ip_to_mac: dict[str, str] = {}
         responding_mt_ips: set[str] = set()
         for mt_dev, arp in zip(mt_devices, arp_results):
             if isinstance(arp, Exception) or not arp:
                 continue
-            responding_mt_ips.add(mt_dev.ip)   # API responded → router is online
+            responding_mt_ips.add(mt_dev.ip)
             for entry in arp:
                 mac = entry.get("mac-address", "").upper().strip()
                 ip  = entry.get("address", "").strip()
@@ -75,73 +76,26 @@ async def enrich_macs_from_mikrotik():
 
         now = datetime.utcnow()
 
-        # ── Pass 1: fill missing MACs + mark ARP-visible devices online ───
-        # The MikroTik ARP table is the ground truth for reachability on its
-        # managed subnets. Any device with a current ARP entry is online —
-        # more reliable than nmap when the backend is on a different subnet.
+        # ── Pass 1: fill missing MACs; mark MikroTik routers themselves online ─
+        # Online detection is handled by the scanner (ping). The one exception:
+        # the router itself — it won't appear in its own ARP table, but if its
+        # API responded it is definitively reachable.
         updated = False
         for device in session.exec(select(Device).where(Device.is_deleted == False)).all():
-            in_arp = device.ip in ip_to_mac
-            is_mt_router = device.ip in responding_mt_ips
-
-            # Fill missing MAC
-            if not device.mac and in_arp:
+            if not device.mac and device.ip in ip_to_mac:
                 device.mac = ip_to_mac[device.ip]
                 updated = True
 
-            # Mark online if seen in ARP table OR if it IS the responding router
-            # (routers don't have ARP entries for themselves)
-            if (in_arp or is_mt_router) and not device.is_online:
+            if device.ip in responding_mt_ips and not device.is_online:
                 device.is_online = True
                 device.offline_since = None
                 device.last_seen = now
                 updated = True
-                src = "router-api" if is_mt_router else "ARP"
-                print(f"[enrich_macs] {src}-online: {device.ip} ({device.label or device.hostname or ''})")
+                print(f"[enrich_macs] router-api-online: {device.ip} ({device.label or device.hostname or ''})")
 
         if updated:
             session.commit()
-            print("[enrich_macs] filled MAC addresses / ARP-online from MikroTik")
-
-        # ── Pass 1b: MikroTik ping for devices still offline ─────────────
-        # ARP only catches recently-active devices. For the rest, ask each
-        # MikroTik to ping from its own interfaces — reaches subnets that
-        # the backend VM cannot probe directly.
-        import ipaddress as _ipaddress
-
-        still_offline = session.exec(
-            select(Device).where(Device.is_deleted == False, Device.is_online == False)
-        ).all()
-
-        if still_offline:
-            # Group offline device IPs by which MikroTik router can reach them
-            # (same subnet, or router has no network filter → ping all)
-            for mt_dev in mt_devices:
-                # Determine which subnets this MikroTik knows about
-                # (approximation: use all offline devices — the router will
-                #  simply fail pings for IPs it can't route to)
-                offline_ips = [d.ip for d in still_offline if not d.is_manual]
-                if not offline_ips:
-                    continue
-
-                alive_ips = await mikrotik.ping_devices(
-                    mt_dev.ip, mt_dev.mikrotik_user, mt_dev.mikrotik_pass,
-                    offline_ips, concurrency=15,
-                )
-
-                if alive_ips:
-                    ping_updated = False
-                    for device in still_offline:
-                        if device.ip in alive_ips and not device.is_online:
-                            device.is_online = True
-                            device.offline_since = None
-                            device.last_seen = now
-                            ping_updated = True
-                            print(f"[enrich_macs] ping-online: {device.ip} ({device.label or device.hostname or ''})")
-                    if ping_updated:
-                        session.commit()
-                        # Update still_offline list for subsequent MikroTik routers
-                        still_offline = [d for d in still_offline if not d.is_online]
+            print("[enrich_macs] filled MACs from MikroTik ARP")
 
         # ── Pass 2: deduplicate same-MAC records ──────────────────────────
         # After filling MACs we may have two records for the same physical

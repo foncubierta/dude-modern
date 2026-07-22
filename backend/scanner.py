@@ -145,15 +145,29 @@ async def _tcp_reachable(ip: str, port: int, timeout: float = 1.0) -> bool:
         return False
 
 
+async def _ping_reachable(ip: str) -> bool:
+    """ICMP ping via OS ping binary. Returns True if the host responds."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping", "-c", "1", "-W", "1", ip,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=2.0)
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
 async def verify_offline_devices(missed_ips: set[str], session) -> set[str]:
     """
-    For IPs that nmap did NOT find, attempt parallel TCP connects to common
-    ports. Returns the subset that ARE reachable.
-    Catches devices that block ICMP but have a web/ssh port open.
+    For IPs nmap missed: ping each one in parallel.
+    Returns the subset that responded. For alive devices without a known
+    web port, also probes common web ports so the UI link stays current.
+    TCP scanning offline devices is pointless — ping first, port-probe only
+    the ones that answer.
     """
     from sqlmodel import select as sel
-
-    FALLBACK_PORTS = [80, 22, 443, 8080, 8443, 8888, 8008, 9000, 9090, 554]
 
     candidates = session.exec(
         sel(Device).where(Device.ip.in_(missed_ips), Device.is_deleted == False)
@@ -162,27 +176,21 @@ async def verify_offline_devices(missed_ips: set[str], session) -> set[str]:
     if not candidates:
         return set()
 
-    # Semaphore to cap concurrent TCP connections (avoids fd exhaustion)
-    sem = asyncio.Semaphore(200)
+    sem = asyncio.Semaphore(50)
 
-    async def _guarded_tcp(ip: str, port: int) -> bool:
+    async def check_one(device: Device) -> Optional[str]:
         async with sem:
-            return await _tcp_reachable(ip, port, timeout=1.0)
+            if not await _ping_reachable(device.ip):
+                return None
+            # Alive — fill web port if missing
+            if not device.web_port:
+                port, protocol = await check_web_port(device.ip)
+                if port:
+                    device.web_port = port
+                    device.web_protocol = protocol
+            return device.ip
 
-    async def check_device(device: Device) -> Optional[str]:
-        ip = device.ip
-        ports = list(FALLBACK_PORTS)
-        if device.web_port and device.web_port not in ports:
-            ports.insert(0, device.web_port)
-
-        # All ports in parallel — if any succeeds, device is alive
-        results = await asyncio.gather(
-            *[_guarded_tcp(ip, p) for p in ports],
-            return_exceptions=True,
-        )
-        return ip if any(r is True for r in results) else None
-
-    results = await asyncio.gather(*[check_device(d) for d in candidates])
+    results = await asyncio.gather(*[check_one(d) for d in candidates])
     return {ip for ip in results if ip}
 
 
