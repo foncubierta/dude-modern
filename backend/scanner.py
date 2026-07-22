@@ -180,13 +180,18 @@ async def verify_offline_devices(missed_ips: set[str], session) -> set[str]:
 
     async def check_one(device: Device) -> Optional[str]:
         async with sem:
-            alive = await _ping_reachable(device.ip)
-            if not alive and device.is_manual:
-                # External IPs (e.g. 8.8.8.8) may block ICMP — try TCP
-                for port in [443, 53, 80]:
-                    if await _tcp_reachable(device.ip, port, timeout=2.0):
+            if device.is_manual:
+                # External/WAN devices: TCP first — ICMP is often filtered
+                # for internet-routed traffic (firewall, ISP, MikroTik rules)
+                alive = False
+                for port in [443, 53, 80, 8080]:
+                    if await _tcp_reachable(device.ip, port, timeout=3.0):
                         alive = True
                         break
+                if not alive:
+                    alive = await _ping_reachable(device.ip)
+            else:
+                alive = await _ping_reachable(device.ip)
             if not alive:
                 return None
             # Alive — fill web port if missing

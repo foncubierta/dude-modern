@@ -818,8 +818,43 @@ class ManualDeviceCreate(BaseModel):
     tags: Optional[str] = None
 
 
+async def _check_manual_device_reachability(device_id: int):
+    """Quick TCP/ping check for a newly-created manual device.
+    Runs in background so the UI doesn't sit on is_online=False indefinitely.
+    """
+    from scanner import _tcp_reachable, _ping_reachable
+    from sqlmodel import Session as S
+
+    with S(engine) as session:
+        d = session.get(Device, device_id)
+        if not d:
+            return
+
+        ip = d.ip
+        alive = False
+        for port in [443, 53, 80, 8080]:
+            if await _tcp_reachable(ip, port, timeout=3.0):
+                alive = True
+                break
+        if not alive:
+            alive = await _ping_reachable(ip)
+
+        if alive:
+            d.is_online = True
+            d.last_seen = datetime.utcnow()
+            d.offline_since = None
+            session.commit()
+            print(f"[manual] {ip} is reachable — marked online")
+        else:
+            print(f"[manual] {ip} is not reachable")
+
+
 @app.post("/api/devices/manual")
-def create_manual_device(body: ManualDeviceCreate, session: Session = Depends(get_session)):
+def create_manual_device(
+    body: ManualDeviceCreate,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_session),
+):
     existing = session.exec(select(Device).where(Device.ip == body.ip)).first()
     if existing:
         raise HTTPException(409, "Device already exists")
@@ -837,6 +872,7 @@ def create_manual_device(body: ManualDeviceCreate, session: Session = Depends(ge
     session.add(d)
     session.commit()
     session.refresh(d)
+    background_tasks.add_task(_check_manual_device_reachability, d.id)
     return d
 
 
