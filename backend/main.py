@@ -70,19 +70,32 @@ async def enrich_macs_from_mikrotik():
         if not ip_to_mac:
             return
 
-        # ── Pass 1: fill missing MACs ─────────────────────────────────────
+        now = datetime.utcnow()
+
+        # ── Pass 1: fill missing MACs + mark ARP-visible devices online ───
+        # The MikroTik ARP table is the ground truth for reachability on its
+        # managed subnets. Any device with a current ARP entry is online —
+        # more reliable than nmap when the backend is on a different subnet.
         updated = False
         for device in session.exec(select(Device).where(Device.is_deleted == False)).all():
-            if device.mac:
-                continue
-            mac = ip_to_mac.get(device.ip)
-            if mac:
-                device.mac = mac
+            in_arp = device.ip in ip_to_mac
+
+            # Fill missing MAC
+            if not device.mac and in_arp:
+                device.mac = ip_to_mac[device.ip]
                 updated = True
+
+            # Mark online if the MikroTik sees this device in its ARP table
+            if in_arp and not device.is_online:
+                device.is_online = True
+                device.offline_since = None
+                device.last_seen = now
+                updated = True
+                print(f"[enrich_macs] ARP-online: {device.ip} ({device.label or device.hostname or ''})")
 
         if updated:
             session.commit()
-            print("[enrich_macs] filled MAC addresses from MikroTik ARP table")
+            print("[enrich_macs] filled MAC addresses / ARP-online from MikroTik")
 
         # ── Pass 2: deduplicate same-MAC records ──────────────────────────
         # After filling MACs we may have two records for the same physical
