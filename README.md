@@ -2,7 +2,7 @@
 
 A self-hosted network monitoring dashboard. Scans your local subnets with nmap, builds an interactive topology map, shows live traffic stats, and integrates with Uptime Kuma for alerting.
 
-Think **The Dude / PRTG — but self-hosted, modern, and running in Docker**.
+Think **The Dude / PRTG — but self-hosted and modern**. Runs in Docker or as a Proxmox LXC.
 
 ---
 
@@ -33,6 +33,43 @@ Think **The Dude / PRTG — but self-hosted, modern, and running in Docker**.
 **Network Subnets** — manage which subnets are scanned, with auto-detected networks shown for quick add:
 
 ![Subnets modal](docs/screenshots/subnets.png)
+
+---
+
+## Quick Start — Proxmox LXC (recommended)
+
+Running as a Proxmox LXC gives nmap full network access without any `network_mode: host` workarounds, and ping works natively.
+
+### 1. Create the container (on the Proxmox host shell)
+
+```bash
+pct create 200 local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst \
+  --hostname dude-modern \
+  --cores 2 --memory 512 --swap 512 \
+  --rootfs local-zfs:4 \
+  --net0 name=eth0,bridge=vmbr0,ip=dhcp \
+  --unprivileged 0 \
+  --features nesting=1 \
+  --start 1
+```
+
+> Adjust `200` (VMID), `local-zfs` (your storage pool) and `vmbr0` (your bridge) as needed.
+> The container must be **privileged** (`--unprivileged 0`) so nmap can use raw sockets.
+
+### 2. Install inside the container
+
+```bash
+pct enter 200
+apt-get update && apt-get install -y curl git && bash <(curl -fsSL https://raw.githubusercontent.com/foncubierta/dude-modern/main/install.sh)
+```
+
+The script installs Python, Node.js, nmap, nginx, builds the frontend, and sets up a systemd service. When it finishes it prints the URL.
+
+### 3. Update
+
+```bash
+bash /opt/dude-modern/update.sh
+```
 
 ---
 

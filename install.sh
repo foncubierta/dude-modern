@@ -18,8 +18,10 @@ PORT=8099
 [[ $EUID -ne 0 ]] && err "Run as root"
 
 # ── System packages ────────────────────────────────────────────────────────────
-msg "Installing system packages..."
+msg "Updating package lists..."
 apt-get update -qq
+
+msg "Installing system packages..."
 apt-get install -y -qq \
     python3 python3-pip python3-venv \
     nmap iproute2 iputils-ping \
